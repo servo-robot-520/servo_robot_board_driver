@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/servo-robot-protocol",
+    "crates/servo-robot-driver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3"
+
+[workspace.dependencies]
+serialport = "4.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+log = "0.4"

@@ -1,0 +1,12 @@
+[package]
+name = "servo-robot-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bitflags = "2.13.0"
+
+[features]
+default = ["std"]
+std = []
+embedded = []
