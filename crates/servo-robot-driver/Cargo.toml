@@ -3,6 +3,9 @@ name = "servo-robot-driver"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 servo-robot-protocol = { path = "../servo-robot-protocol" }
 thiserror = "2"
@@ -21,3 +24,4 @@ default = []
 mock = ["rand"]
 async = ["tokio"]
 test = ["mock"]  # 启用测试，自动启用 mock
+ffi = []  # C FFI 包装层

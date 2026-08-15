@@ -15,6 +15,10 @@ pub mod reconnect;
 pub mod state;
 pub mod transport;
 
+// C FFI 包装层
+#[cfg(feature = "ffi")]
+pub mod ffi;
+
 #[cfg(feature = "async")]
 pub mod async_driver;
 
