@@ -456,10 +456,79 @@ let all_config = driver.query_all_configs_sync()?;
 let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
 ```
 
+## C/C++ Integration (FFI)
+
+Enable the `ffi` feature to compile the driver into a shared library (`.so`) callable from C/C++.
+
+### Build the .so
+
+```bash
+# From the repo root; --features ffi is required, otherwise the .so exports no sr_* symbols
+cargo build --release --features ffi
+# Output: target/release/libservo_robot_driver.so (17 sr_driver_* exported symbols)
+nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
+```
+
+Header: `include/servo_robot_driver.h` (single interface contract: structs, enums, function declarations, threading red lines).
+
+### One-shot packaging (recommended)
+
+```bash
+crates/servo-robot-driver/ffi/package_ffi.sh [output_dir]
+# Default output at the repo root ffi-dist/:
+#   ffi-dist/
+#   ├── CMakeLists.txt            # pre-configured: imports .so + builds examples
+#   ├── README.md
+#   ├── include/servo_robot_driver.h
+#   ├── lib/libservo_robot_driver.so
+#   └── examples/cpp_example.cpp, smoke_test.c
+```
+
+Copy the whole `ffi-dist/` into a C/C++ project and build:
+
+```bash
+cd ffi-dist
+cmake -S . -B build && cmake --build build
+./build/cpp_example /dev/ttyUSB0 115200
+```
+
+### Manual integration
+
+```c
+#include "servo_robot_driver.h"   // extern "C" guarded, safe to include from C++
+
+sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
+sr_driver_start(d);
+
+sr_board_config cfg;
+sr_driver_query_all_configs(d, &cfg);        // sync, blocks ≤1s
+sr_driver_write_config_sync(d, (sr_config){.typ = SR_CONFIG_SERVO_BAUD_RATE, .value = 1000000}, &ok);
+
+sr_driver_stop(d);
+sr_driver_free(d);                            // must be called last
+```
+
+```bash
+gcc my_prog.c -I <include dir> -L target/release -lservo_robot_driver \
+    -Wl,-rpath,$PWD/target/release -o my_prog   # or g++ for C++
+```
+
+Runtime options (pick one): `-Wl,-rpath` at link time / `LD_LIBRARY_PATH` / install to `/usr/local/lib` + `ldconfig`.
+
+### Red lines
+
+- Callbacks run on the driver's **dispatch thread**; never call any `sr_driver_*` from inside a callback (especially `sr_driver_free` — self-deadlock)
+- Callback argument pointers are valid only during the callback
+- Never `sr_driver_free` while other threads are still using the handle (use-after-free)
+- Sync functions block ≤1s (driver default timeout)
+
+Full examples: `ffi/smoke_test.c` (minimal C) and `ffi/cpp_example.cpp` (C++ RAII + callbacks + full lifecycle).
+
 ## Feature Flags
 
 | Feature | Dependency | Description |
 |---------|-----------|-------------|
 | `mock` | `rand` | Enable MockTransport |
 | `async` | `tokio` | Enable AsyncDriver (thin facade over sync Driver) |
+| `ffi` | — | Enable C FFI layer (.so exports) |
 

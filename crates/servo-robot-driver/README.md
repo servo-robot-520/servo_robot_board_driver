@@ -460,10 +460,80 @@ let all_config = driver.query_all_configs_sync()?;
 let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
 ```
 
+## C/C++ 集成（FFI）
+
+启用 `ffi` feature 可把驱动编译为共享库（`.so`），供 C/C++ 直接调用。
+
+### 编译 .so
+
+```bash
+# 仓库根目录;必须带 --features ffi,否则 .so 内没有可调用的 sr_* 符号
+cargo build --release --features ffi
+# 产物: target/release/libservo_robot_driver.so(17 个 sr_driver_* 导出符号)
+nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
+```
+
+头文件:`include/servo_robot_driver.h`(唯一接口契约,含结构体/枚举/函数声明/线程红线)。
+
+### 一键打包(推荐)
+
+```bash
+crates/servo-robot-driver/ffi/package_ffi.sh [输出目录]
+# 默认输出到仓库根 ffi-dist/:
+#   ffi-dist/
+#   ├── CMakeLists.txt            # 已配置好导入 .so + 示例构建
+#   ├── README.md
+#   ├── include/servo_robot_driver.h
+#   ├── lib/libservo_robot_driver.so
+#   └── examples/cpp_example.cpp, smoke_test.c
+```
+
+整个 `ffi-dist/` 复制进 C/C++ 项目即可:
+
+```bash
+cd ffi-dist
+cmake -S . -B build && cmake --build build
+./build/cpp_example /dev/ttyUSB0 115200
+```
+
+### 手动集成
+
+```c
+#include "servo_robot_driver.h"   // extern "C" 已包裹,C++ 直接 include
+
+sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
+sr_driver_start(d);
+
+sr_board_config cfg;
+sr_driver_query_all_configs(d, &cfg);        // 同步,阻塞 ≤1s
+sr_driver_write_config_sync(d, (sr_config){.typ = SR_CONFIG_SERVO_BAUD_RATE, .value = 1000000}, &ok);
+
+sr_driver_stop(d);
+sr_driver_free(d);                            // 必须最后调用
+```
+
+```bash
+gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
+    -Wl,-rpath,$PWD/target/release -o my_prog   # C++
+g++ my_prog.cpp ... 同上                          # g++ 同理
+```
+
+运行时三选一:编译时 `-Wl,-rpath` / `LD_LIBRARY_PATH` / 安装到 `/usr/local/lib` + `ldconfig`。
+
+### 红线
+
+- 回调在驱动**分发线程**执行;回调内禁止调用任何 `sr_driver_*`(尤其 `sr_driver_free`,自死锁)
+- 回调参数指针仅在回调执行期间有效
+- 禁止在有其他线程调用句柄时 `sr_driver_free`(use-after-free)
+- 同步函数阻塞 ≤1s(驱动默认超时)
+
+完整示例见 `ffi/smoke_test.c`(最小 C)与 `ffi/cpp_example.cpp`(C++ RAII + 回调 + 全生命周期)。
+
 ## Feature Flags
 
 | Feature | 依赖 | 说明 |
 |---------|------|------|
 | `mock` | `rand` | 启用 MockTransport 模拟传输层 |
 | `async` | `tokio` | 启用 AsyncDriver（同步 Driver 的薄门面） |
+| `ffi` | — | 启用 C FFI 层（.so 导出） |
 
