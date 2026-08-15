@@ -7,8 +7,6 @@
 
 //! 模拟传输层实现
 
-#[cfg(feature = "async")]
-pub mod async_mock;
 pub(crate) mod mock_core;
 pub mod mock_data;
 
@@ -16,9 +14,6 @@ use crate::error::DriverError;
 use crate::transport::Transport;
 use mock_core::MockCore;
 use std::time::Duration;
-
-#[cfg(feature = "async")]
-pub use async_mock::AsyncMockTransport;
 
 /// 模拟传输层（同步）
 pub struct MockTransport {

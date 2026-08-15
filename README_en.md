@@ -129,11 +129,13 @@ driver.start()?;
 
 ### Async Driver (requires `async` feature)
 
-```rust
-use servo_robot_driver::{AsyncDriver, TokioSerialTransport};
+`AsyncDriver` is a thin facade over the sync `Driver`: operations run via `spawn_blocking` on the tokio blocking pool, while I/O and callbacks stay on the driver's dedicated threads.
 
-let transport = TokioSerialTransport::open("/dev/ttyUSB0", 115200)?;
-let mut driver = AsyncDriver::new(transport);
+```rust
+use servo_robot_driver::{AsyncDriver, SerialTransport};
+
+let transport = SerialTransport::open("/dev/ttyUSB0", 115200)?;
+let driver = AsyncDriver::new(transport);
 driver.start().await?;
 ```
 
@@ -142,7 +144,7 @@ driver.start().await?;
 | Crate | Feature | Description |
 |-------|---------|-------------|
 | servo-robot-driver | `mock` | Enable MockTransport |
-| servo-robot-driver | `async` | Enable AsyncDriver and async transport |
+| servo-robot-driver | `async` | Enable AsyncDriver (thin facade over sync Driver) |
 | servo-robot-protocol | `embedded` | Embedded mode (`no_std`) |
 
 ## Detailed Docs

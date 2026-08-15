@@ -7,7 +7,7 @@
 
 //! Mock 传输层共享内核
 //!
-//! 包含所有模拟状态和逻辑，供 MockTransport 和 AsyncMockTransport 复用。
+//! 包含所有模拟状态和逻辑，供 MockTransport 使用。
 
 use super::mock_data::*;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};

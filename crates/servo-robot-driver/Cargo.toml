@@ -13,7 +13,7 @@ flume = "0.12"
 log = { workspace = true }
 serialport = { workspace = true }
 rand = { version = "0.10", optional = true }
-tokio = { version = "1.52", features = ["rt", "sync", "time", "macros"], optional = true }
+tokio = { version = "1.52", features = ["rt", "time", "macros"], optional = true }
 
 [dev-dependencies]
 # 集成测试依赖（仅在启用 test feature 时使用）

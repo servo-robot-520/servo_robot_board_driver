@@ -40,12 +40,6 @@ pub use transport::{Transport, TransportFactory};
 #[cfg(feature = "mock")]
 pub use transport::MockTransport;
 
-// 异步传输层（需要启用 async feature）
+// 异步门面（需要启用 async feature）— 同步 Driver 的薄封装
 #[cfg(feature = "async")]
 pub use async_driver::AsyncDriver;
-#[cfg(all(feature = "mock", feature = "async"))]
-pub use transport::AsyncMockTransport;
-#[cfg(feature = "async")]
-pub use transport::{
-    AsyncTransport, AsyncTransportFactory, FnAsyncTransportFactory, TokioSerialTransport,
-};

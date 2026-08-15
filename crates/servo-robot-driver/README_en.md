@@ -36,10 +36,10 @@ The communication driver between the host computer and ServoRobotBoard is used f
 ├─────────┼────────────────────────────────────────────────────────┤
 │         ▼                                                        │
 │  ┌──────────────────────────────────────────────────────────┐    │
-│  │              Transport / AsyncTransport (trait)          │    │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │    │
-│  │  │ Serial   │  │  Mock    │  │ Tokio    │  │  Custom  │  │    │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │    │
+│  │                     Transport (trait)                    │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌────────────────────────┐  │    │
+│  │  │ Serial   │  │  Mock    │  │  Custom (extension)     │  │    │
+│  │  └──────────┘  └──────────┘  └────────────────────────┘  │    │
 │  └──────────────────────────────────────────────────────────┘    │
 ├──────────────────────────────────────────────────────────────────┤
 │                       Protocol Layer                             │
@@ -87,7 +87,7 @@ pub trait Transport: Send + 'static {
 
 - **SerialTransport**: Serial implementation using `serialport` crate
 - **MockTransport**: Simulated data for development and testing
-- **AsyncTransport**: Tokio async implementation (feature gated)
+- **AsyncDriver**: Thin async facade over sync `Driver` (`spawn_blocking`, feature gated)
 
 #### 2. Driver
 
@@ -461,6 +461,5 @@ let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
 | Feature | Dependency | Description |
 |---------|-----------|-------------|
 | `mock` | `rand` | Enable MockTransport |
-| `async` | `tokio` | Enable AsyncDriver and async transport |
-| `async,mock` | `tokio`, `rand` | Enable AsyncMockTransport |
+| `async` | `tokio` | Enable AsyncDriver (thin facade over sync Driver) |
 

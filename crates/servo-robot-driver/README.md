@@ -36,11 +36,11 @@
 ├─────────┼────────────────────────────────────────────────────────┤
 │         ▼                                                        │
 │  ┌──────────────────────────────────────────────────────────┐   │
-│  │              Transport / AsyncTransport (trait)            │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │   │
-│  │  │ Serial   │  │  Mock    │  │ Tokio    │  │  Custom  │ │   │
-│  │  │ (串口)   │  │ (模拟)   │  │ (异步串口)│  │ (扩展)   │ │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │   │
+│  │                     Transport (trait)                     │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌────────────────────────┐  │   │
+│  │  │ Serial   │  │  Mock    │  │  Custom (扩展)          │  │   │
+│  │  │ (串口)   │  │ (模拟)   │  │                        │  │   │
+│  │  └──────────┘  └──────────┘  └────────────────────────┘  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
 ├──────────────────────────────────────────────────────────────────┤
@@ -91,7 +91,7 @@ pub trait Transport: Send + 'static {
 
 - **SerialTransport**: 使用 `serialport` crate 的串口实现
 - **MockTransport**: 模拟真实数据，用于开发和测试
-- **AsyncTransport**: tokio 异步实现（feature gated）
+- **AsyncDriver**: 同步 `Driver` 的薄异步门面（`spawn_blocking` 包装，feature gated）
 
 #### 2. Driver
 
@@ -465,6 +465,5 @@ let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
 | Feature | 依赖 | 说明 |
 |---------|------|------|
 | `mock` | `rand` | 启用 MockTransport 模拟传输层 |
-| `async` | `tokio` | 启用 AsyncDriver 和异步传输层 |
-| `async,mock` | `tokio`, `rand` | 启用 AsyncMockTransport |
+| `async` | `tokio` | 启用 AsyncDriver（同步 Driver 的薄门面） |
 

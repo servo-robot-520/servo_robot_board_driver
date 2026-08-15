@@ -45,7 +45,7 @@ impl SerialTransport {
 
 /// 从 Read trait 对象读取一帧数据
 ///
-/// 统一的帧读取逻辑，供 SerialTransport 和 TokioSerialTransport 共用。
+/// 统一的帧读取逻辑，供 SerialTransport 使用。
 pub(crate) fn read_frame_from_reader(
     port: &mut dyn Read,
     port_name: &str,

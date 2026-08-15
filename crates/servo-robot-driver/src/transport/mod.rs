@@ -13,11 +13,6 @@ pub mod frame_codec;
 pub mod mock;
 pub mod serial;
 
-#[cfg(feature = "async")]
-pub mod async_serial;
-#[cfg(feature = "async")]
-pub mod async_trait;
-
 use crate::error::DriverError;
 
 /// 传输层抽象，支持未来替换为 tokio 异步实现
@@ -38,11 +33,3 @@ pub use factory::{FnTransportFactory, TransportFactory};
 // 重导出模拟传输层
 #[cfg(feature = "mock")]
 pub use mock::MockTransport;
-
-// 重导出异步传输层
-#[cfg(feature = "async")]
-pub use async_serial::TokioSerialTransport;
-#[cfg(feature = "async")]
-pub use async_trait::{AsyncTransport, AsyncTransportFactory, FnAsyncTransportFactory};
-#[cfg(all(feature = "mock", feature = "async"))]
-pub use mock::AsyncMockTransport;

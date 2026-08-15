@@ -129,11 +129,13 @@ driver.start()?;
 
 ### 异步驱动（需 `async` feature）
 
-```rust
-use servo_robot_driver::{AsyncDriver, TokioSerialTransport};
+`AsyncDriver` 是同步 `Driver` 的薄封装：操作经 `spawn_blocking` 在 tokio 阻塞池执行，I/O 与回调仍在驱动专用线程上。
 
-let transport = TokioSerialTransport::open("/dev/ttyUSB0", 115200)?;
-let mut driver = AsyncDriver::new(transport);
+```rust
+use servo_robot_driver::{AsyncDriver, SerialTransport};
+
+let transport = SerialTransport::open("/dev/ttyUSB0", 115200)?;
+let driver = AsyncDriver::new(transport);
 driver.start().await?;
 ```
 
@@ -142,7 +144,7 @@ driver.start().await?;
 | Crate | Feature | 说明 |
 |-------|---------|------|
 | servo-robot-driver | `mock` | 启用 MockTransport 模拟传输层 |
-| servo-robot-driver | `async` | 启用 AsyncDriver 和异步传输层 |
+| servo-robot-driver | `async` | 启用 AsyncDriver（同步 Driver 的薄门面） |
 | servo-robot-protocol | `embedded` | 嵌入式模式（`no_std`）|
 
 ## 详细文档

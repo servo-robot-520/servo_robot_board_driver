@@ -152,22 +152,4 @@ impl EventBus {
             }
         }
     }
-
-    /// 异步接收事件（主通道）
-    #[cfg(feature = "async")]
-    pub async fn recv_async(&self) -> Result<DriverEvent, DriverError> {
-        self.rx
-            .recv_async()
-            .await
-            .map_err(|_| DriverError::TransportClosed)
-    }
-
-    /// 异步接收 ACK 事件
-    #[cfg(feature = "async")]
-    pub async fn recv_ack_async(&self) -> Result<DriverEvent, DriverError> {
-        self.ack_rx
-            .recv_async()
-            .await
-            .map_err(|_| DriverError::TransportClosed)
-    }
 }
