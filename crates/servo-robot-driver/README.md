@@ -485,7 +485,7 @@ crates/servo-robot-driver/ffi/package_ffi.sh [输出目录]
 #   ├── README.md
 #   ├── include/servo_robot_driver.h
 #   ├── lib/libservo_robot_driver.so
-#   └── examples/cpp_example.cpp, smoke_test.c
+#   └── examples/cpp_example.cpp, c_example.c
 ```
 
 整个 `ffi-dist/` 复制进 C/C++ 项目即可:
@@ -527,7 +527,7 @@ g++ my_prog.cpp ... 同上                          # g++ 同理
 - 禁止在有其他线程调用句柄时 `sr_driver_free`(use-after-free)
 - 同步函数阻塞 ≤1s(驱动默认超时)
 
-完整示例见 `ffi/smoke_test.c`(最小 C)与 `ffi/cpp_example.cpp`(C++ RAII + 回调 + 全生命周期)。
+完整示例见 `ffi/c_example.c`(C 自由函数回调)与 `ffi/cpp_example.cpp`(C++ 类内回调,ROS2 节点风格);`ffi/smoke_test.c` 是内部测试,非示例。
 
 ## Feature Flags
 

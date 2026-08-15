@@ -481,7 +481,7 @@ crates/servo-robot-driver/ffi/package_ffi.sh [output_dir]
 #   ├── README.md
 #   ├── include/servo_robot_driver.h
 #   ├── lib/libservo_robot_driver.so
-#   └── examples/cpp_example.cpp, smoke_test.c
+#   └── examples/cpp_example.cpp, c_example.c
 ```
 
 Copy the whole `ffi-dist/` into a C/C++ project and build:
@@ -522,7 +522,7 @@ Runtime options (pick one): `-Wl,-rpath` at link time / `LD_LIBRARY_PATH` / inst
 - Never `sr_driver_free` while other threads are still using the handle (use-after-free)
 - Sync functions block ≤1s (driver default timeout)
 
-Full examples: `ffi/smoke_test.c` (minimal C) and `ffi/cpp_example.cpp` (C++ RAII + callbacks + full lifecycle).
+Full examples: `ffi/c_example.c` (C, free-function callbacks) and `ffi/cpp_example.cpp` (C++, class-based callbacks, ROS2-node style); `ffi/smoke_test.c` is an internal test, not an example.
 
 ## Feature Flags
 

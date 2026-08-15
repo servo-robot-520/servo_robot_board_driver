@@ -1,4 +1,9 @@
-// servo-robot-driver C++ 使用示例 — 演示完整驱动生命周期
+// servo-robot-driver C++ 使用示例 — 类内回调模式(ROS2 节点风格)
+//
+// 回调桥:FFI 需要 C 链接的裸函数指针,类方法不能直接进 sr_callbacks。
+// 方案:extern "C" thunk + userdata 指向 CallbackCtx(std::function 槽),
+// 节点构造时用 lambda 把成员方法绑进槽位。ROS2 中把成员方法里的 printf
+// 换成 topic 发布 / RCLCPP_INFO 即可。
 //
 // 编译:
 //   cargo build --release --features ffi
@@ -9,17 +14,15 @@
 // 运行(真实设备):
 //   ./cpp_example /dev/ttyUSB0 115200
 //
-// 运行(无设备,验证错误路径):
-//   ./cpp_example /dev/nonexistent 115200
-//
-// 线程红线:回调在驱动分发线程触发,回调内禁止调用任何 sr_driver_*;
-// 回调参数指针仅在回调执行期间有效。
+// 线程模型:回调在驱动分发线程执行;回调内禁止调用任何 sr_driver_*。
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -28,7 +31,7 @@
 
 namespace {
 
-// ═══ RAII 句柄:析构自动释放,C++ 惯用法封装 ═══
+// ═══ RAII 句柄 ═══
 class SrDriver {
 public:
     SrDriver(const char* port, uint32_t baud) {
@@ -46,7 +49,6 @@ public:
 
     sr_driver* get() const { return handle_; }
 
-    // 包装错误码 → 异常(带上错误码;详细描述可查 sr_driver_last_error)
     static void throw_on_error(int rc, const char* what) {
         if (rc != SR_OK) {
             throw std::runtime_error(std::string(what) + " failed, error code " +
@@ -58,63 +60,33 @@ private:
     sr_driver* handle_ = nullptr;
 };
 
-// ═══ 回调上下文(userdata 透传) ═══
+// ═══ 回调桥:std::function 槽位(构造时绑定,回调零分配) ═══
 struct CallbackCtx {
-    uint64_t imu_count = 0;
-    uint64_t power_count = 0;
-    uint64_t battery_count = 0;
-    uint64_t log_count = 0;
+    std::function<void(const sr_imu*)> on_imu;
+    std::function<void(const sr_power*)> on_power;
+    std::function<void(const sr_battery_state*)> on_battery;
+    std::function<void(const sr_log_message*)> on_log;
+    std::function<void(int)> on_error;
 };
 
-// 回调均为 C 链接(函数指针表),经 userdata 还原上下文
 extern "C" {
-
-void on_imu(void* userdata, const sr_imu* data) {
-    auto* ctx = static_cast<CallbackCtx*>(userdata);
-    ctx->imu_count++;
-    if (ctx->imu_count <= 3) {
-        std::printf("[IMU #%lu] roll=%7.2f pitch=%7.2f yaw=%7.2f\n",
-                    ctx->imu_count, data->roll, data->pitch, data->yaw);
-    }
+void imu_thunk(void* u, const sr_imu* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_imu) c->on_imu(d);
 }
-
-void on_power(void* userdata, const sr_power* data) {
-    auto* ctx = static_cast<CallbackCtx*>(userdata);
-    ctx->power_count++;
-    if (ctx->power_count <= 3) {
-        // 协议约定:电压/电流原始值 = 实际值 × 10(与 Rust Display 一致)
-        std::printf("[PWR] servo %5.1f V / %5.1f A, bat %5.1f V\n",
-                    data->servo_voltage_mv / 10.0f, data->servo_current_ma / 10.0f,
-                    data->bat_voltage_mv / 10.0f);
-    }
+void power_thunk(void* u, const sr_power* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_power) c->on_power(d);
 }
-
-void on_battery(void* userdata, const sr_battery_state* state) {
-    auto* ctx = static_cast<CallbackCtx*>(userdata);
-    ctx->battery_count++;
-    if (ctx->battery_count <= 3) {
-        std::printf("[BAT] %u%%, temp %d.%d C, %u cells\n",
-                    state->percentage, state->temperature / 10,
-                    state->temperature % 10, state->cell_count);
-    }
+void battery_thunk(void* u, const sr_battery_state* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_battery) c->on_battery(d);
 }
-
-void on_log(void* userdata, const sr_log_message* msg) {
-    auto* ctx = static_cast<CallbackCtx*>(userdata);
-    ctx->log_count++;
-    std::printf("[BOARD LOG] %s::%s: %s\n",
-                msg->file_name ? msg->file_name : "?",
-                msg->fun_name ? msg->fun_name : "?", msg->msg ? msg->msg : "");
+void log_thunk(void* u, const sr_log_message* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_log) c->on_log(d);
 }
-
-void on_error(void* userdata, int error_code) {
-    (void)userdata;
-    std::fprintf(stderr, "[DRIVER ERROR] code=%d\n", error_code);
+void error_thunk(void* u, int code) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_error) c->on_error(code);
 }
-
 } // extern "C"
 
-// 错误码 → 描述(示例用;生产代码可直接查 SR_ERR_* 常量)
 const char* err_name(int rc) {
     switch (rc) {
         case SR_OK: return "OK";
@@ -133,37 +105,38 @@ const char* err_name(int rc) {
     }
 }
 
-} // namespace
+// ═══ 驱动节点(ROS2 节点结构映射) ═══
+//
+// 成员顺序:ctx_ 先于 driver_ —— 析构时 driver_ 先销毁(join 分发线程,
+// 期间 ctx_ 仍存活),回调不会用到已销毁的上下文。
+class ServoRobotDriverNode {
+public:
+    ServoRobotDriverNode(const char* port, uint32_t baud) : driver_(port, baud) {
+        // ROS2 中:这里保持 thunk 桥,成员方法内做 publish/log
+        ctx_.on_imu = [this](const sr_imu* d) { onImu(d); };
+        ctx_.on_power = [this](const sr_power* d) { onPower(d); };
+        ctx_.on_battery = [this](const sr_battery_state* d) { onBattery(d); };
+        ctx_.on_log = [this](const sr_log_message* d) { onLog(d); };
+        ctx_.on_error = [this](int code) { onError(code); };
 
-int main(int argc, char** argv) {
-    const char* port = argc > 1 ? argv[1] : "/dev/ttyUSB0";
-    const uint32_t baud = argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 115200;
-
-    try {
-        std::printf("== servo-robot-driver C++ example ==\n");
-
-        // 1. 打开串口(RAII 持有)
-        SrDriver driver(port, baud);
-        std::printf("opened %s @ %u baud\n", port, baud);
-
-        // 2. 注册回调(全 NULL 的槽位被忽略;可任意时刻替换)
-        CallbackCtx ctx;
         sr_callbacks cbs{};
-        cbs.userdata = &ctx;
-        cbs.on_imu_data = on_imu;
-        cbs.on_power_data = on_power;
-        cbs.on_battery_state = on_battery;
-        cbs.on_log = on_log;
-        cbs.on_error = on_error;
-        SrDriver::throw_on_error(sr_driver_set_callbacks(driver.get(), &cbs),
+        cbs.userdata = &ctx_;
+        cbs.on_imu_data = imu_thunk;
+        cbs.on_power_data = power_thunk;
+        cbs.on_battery_state = battery_thunk;
+        cbs.on_log = log_thunk;
+        cbs.on_error = error_thunk;
+        SrDriver::throw_on_error(sr_driver_set_callbacks(driver_.get(), &cbs),
                                  "set_callbacks");
+    }
 
-        // 3. 启动(读线程 + 分发线程)
-        SrDriver::throw_on_error(sr_driver_start(driver.get()), "start");
+    // 完整生命周期(ROS2 中:start 在节点构造/on_configure,stop 在 on_shutdown)
+    void run() {
+        SrDriver::throw_on_error(sr_driver_start(driver_.get()), "start");
 
-        // 4. 查询全部配置(同步,阻塞 ≤1s)
+        // 查询全部配置(同步,阻塞 ≤1s)
         sr_board_config cfg{};
-        int rc = sr_driver_query_all_configs(driver.get(), &cfg);
+        int rc = sr_driver_query_all_configs(driver_.get(), &cfg);
         if (rc != SR_OK) {
             std::printf("query_all_configs: %s\n", err_name(rc));
         } else {
@@ -174,42 +147,96 @@ int main(int argc, char** argv) {
                         cfg.power_servo_on ? "ON" : "OFF");
         }
 
-        // 5. 写配置并等待确认(同步)
-        uint8_t success = 0;
+        // 写配置并等待确认(同步)
+        uint8_t ok = 0;
         sr_config sc{};
         sc.typ = SR_CONFIG_SERVO_BAUD_RATE;
-        sc.value = 1000000.0f; // 1,000,000 baud
-        rc = sr_driver_write_config_sync(driver.get(), sc, &success);
-        if (rc != SR_OK) {
-            std::printf("write_config(baud=1000000): %s\n", err_name(rc));
-        } else {
-            std::printf("write_config(baud=1000000): %s\n",
-                        success ? "ACK" : "NACK");
-        }
+        sc.value = 1000000.0f;
+        rc = sr_driver_write_config_sync(driver_.get(), sc, &ok);
+        std::printf("write_config(baud=1000000): %s\n",
+                    rc != SR_OK ? err_name(rc) : (ok ? "ACK" : "NACK"));
 
-        // 6. 舵机命令透传(不等待应答;字节内容取决于舵机协议)
+        // 舵机命令透传(不等待应答;字节内容取决于舵机协议)
         const uint8_t servo_cmd[] = {0x01, 0x02}; // 示例字节,按实际协议替换
-        rc = sr_driver_forward_servo(driver.get(), servo_cmd, sizeof servo_cmd);
+        rc = sr_driver_forward_servo(driver_.get(), servo_cmd, sizeof servo_cmd);
         if (rc != SR_OK) {
             std::printf("forward_servo: %s\n", err_name(rc));
         }
 
-        // 7. 板级命令(同步;注意 Reset 会重启板子,默认不发送)
-        // uint8_t cmd_ok = 0;
-        // rc = sr_driver_send_command_sync(driver.get(), SR_CMD_RESET, &cmd_ok);
-        // std::printf("send_command(Reset): %s\n", cmd_ok ? "ACK" : "NACK");
-
-        // 8. 收 1 秒数据,观察回调
+        // 收 1 秒数据,观察成员回调(ROS2 中由 spin 驱动,无需显式 sleep)
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         std::printf("received %lu imu, %lu power, %lu battery, %lu log frames\n",
-                    ctx.imu_count, ctx.power_count, ctx.battery_count, ctx.log_count);
+                    imu_count_.load(), power_count_.load(),
+                    battery_count_.load(), log_count_.load());
 
-        // 9. 停止(join 读/分发线程);析构时自动 free
-        SrDriver::throw_on_error(sr_driver_stop(driver.get()), "stop");
+        SrDriver::throw_on_error(sr_driver_stop(driver_.get()), "stop");
+    }
 
+private:
+    // ═══ 类内成员回调(ROS2 中替换 printf 为 topic 发布 / RCLCPP_INFO) ═══
+    void onImu(const sr_imu* data) {
+        imu_count_.fetch_add(1, std::memory_order_relaxed);
+        if (imu_count_.load(std::memory_order_relaxed) <= 3) {
+            std::printf("[IMU #%lu] roll=%7.2f pitch=%7.2f yaw=%7.2f\n",
+                        imu_count_.load(std::memory_order_relaxed),
+                        data->roll, data->pitch, data->yaw);
+        }
+    }
+
+    void onPower(const sr_power* data) {
+        power_count_.fetch_add(1, std::memory_order_relaxed);
+        if (power_count_.load(std::memory_order_relaxed) <= 3) {
+            // 协议约定:电压/电流原始值 = 实际值 × 10(与 Rust Display 一致)
+            std::printf("[PWR] servo %5.1f V / %5.1f A, bat %5.1f V\n",
+                        data->servo_voltage_mv / 10.0f,
+                        data->servo_current_ma / 10.0f,
+                        data->bat_voltage_mv / 10.0f);
+        }
+    }
+
+    void onBattery(const sr_battery_state* state) {
+        battery_count_.fetch_add(1, std::memory_order_relaxed);
+        if (battery_count_.load(std::memory_order_relaxed) <= 3) {
+            std::printf("[BAT] %u%%, temp %d.%d C, %u cells\n",
+                        state->percentage, state->temperature / 10,
+                        state->temperature % 10, state->cell_count);
+        }
+    }
+
+    void onLog(const sr_log_message* msg) {
+        log_count_.fetch_add(1, std::memory_order_relaxed);
+        std::printf("[BOARD LOG] %s::%s: %s\n",
+                    msg->file_name ? msg->file_name : "?",
+                    msg->fun_name ? msg->fun_name : "?", msg->msg ? msg->msg : "");
+    }
+
+    void onError(int code) {
+        std::fprintf(stderr, "[DRIVER ERROR] code=%d\n", code);
+    }
+
+    // 成员顺序:ctx_ 先于 driver_(见类注释)
+    CallbackCtx ctx_;
+    SrDriver driver_;
+
+    // 跨线程计数:分发线程写,主线程读 → 必须原子
+    std::atomic<uint64_t> imu_count_{0};
+    std::atomic<uint64_t> power_count_{0};
+    std::atomic<uint64_t> battery_count_{0};
+    std::atomic<uint64_t> log_count_{0};
+};
+
+} // namespace
+
+int main(int argc, char** argv) {
+    const char* port = argc > 1 ? argv[1] : "/dev/ttyUSB0";
+    const uint32_t baud = argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 115200;
+
+    try {
+        std::printf("== servo-robot-driver C++ example (class-based callbacks) ==\n");
+        ServoRobotDriverNode node(port, baud);
+        node.run();
         std::printf("== done ==\n");
         return 0;
-
     } catch (const std::exception& e) {
         std::fprintf(stderr, "FATAL: %s\n", e.what());
         return 1;

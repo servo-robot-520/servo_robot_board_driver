@@ -30,7 +30,7 @@ mkdir -p "$OUT_DIR/include" "$OUT_DIR/lib" "$OUT_DIR/examples"
 
 cp "$SO_FILE" "$OUT_DIR/lib/"
 cp "$CRATE_DIR/include/servo_robot_driver.h" "$OUT_DIR/include/"
-cp "$CRATE_DIR/ffi/cpp_example.cpp" "$CRATE_DIR/ffi/smoke_test.c" "$OUT_DIR/examples/"
+cp "$CRATE_DIR/ffi/cpp_example.cpp" "$CRATE_DIR/ffi/c_example.c" "$OUT_DIR/examples/"
 
 echo "==> [3/4] writing CMakeLists.txt"
 cat > "$OUT_DIR/CMakeLists.txt" << 'EOF'
@@ -44,16 +44,16 @@ set_target_properties(servo_robot_driver PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-# C++ 示例(完整生命周期: RAII + 回调 + 配置读写)
+# C++ 示例(完整生命周期: RAII + 类内回调 + 配置读写)
 add_executable(cpp_example examples/cpp_example.cpp)
 target_link_libraries(cpp_example PRIVATE servo_robot_driver)
 
-# C 冒烟示例
-add_executable(smoke_test examples/smoke_test.c)
-target_link_libraries(smoke_test PRIVATE servo_robot_driver)
+# C 示例(完整生命周期: 自由函数回调 + 配置读写)
+add_executable(c_example examples/c_example.c)
+target_link_libraries(c_example PRIVATE servo_robot_driver)
 
 # 运行时直接找到 .so,无需 LD_LIBRARY_PATH
-set_target_properties(cpp_example smoke_test PROPERTIES
+set_target_properties(cpp_example c_example PROPERTIES
     BUILD_RPATH  "${CMAKE_CURRENT_SOURCE_DIR}/lib"
     INSTALL_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/lib"
 )
@@ -75,8 +75,8 @@ cmake --build build
 ## 运行
 
 ```bash
-./build/cpp_example /dev/ttyUSB0 115200   # C++ 完整示例
-./build/smoke_test                        # C 冒烟测试(错误路径/NULL 安全)
+./build/cpp_example /dev/ttyUSB0 115200   # C++ 示例(类内回调,ROS2 节点风格)
+./build/c_example /dev/ttyUSB0 115200     # C 示例
 ```
 
 ## 集成到你的项目
@@ -114,7 +114,7 @@ echo "  ├── CMakeLists.txt"
 echo "  ├── README.md"
 echo "  ├── include/servo_robot_driver.h"
 echo "  ├── lib/libservo_robot_driver.so"
-echo "  └── examples/{cpp_example.cpp, smoke_test.c}"
+echo "  └── examples/{cpp_example.cpp, c_example.c}"
 echo
 echo "下一步:"
 echo "  cd $OUT_DIR"
