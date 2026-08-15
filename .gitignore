@@ -2,3 +2,4 @@
 
 target/
 ffi-dist/
+smoke_test
