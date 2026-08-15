@@ -21,6 +21,10 @@ pub enum DriverError {
     #[error("IO error: {0}")]
     Io(String),
 
+    /// 串口读超时(结构化判断,替代字符串匹配)
+    #[error("IO timed out")]
+    IoTimeout,
+
     #[error("Frame parse error: {0}")]
     Frame(#[from] FrameError),
 
@@ -41,6 +45,9 @@ pub enum DriverError {
 
     #[error("Driver not running")]
     NotRunning,
+
+    #[error("Driver already started")]
+    AlreadyStarted,
 
     #[error("Lock poisoned")]
     LockPoisoned,

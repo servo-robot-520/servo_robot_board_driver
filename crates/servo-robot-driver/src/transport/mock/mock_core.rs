@@ -289,6 +289,39 @@ impl MockCore {
                         );
                     }
                 }
+                FrameType::Command => {
+                    // 模拟板级命令执行成功
+                    let ack = RawFrame {
+                        frame_type: FrameType::AckCommand,
+                        payload: vec![1],
+                    };
+                    self.priority_queue.push_back(ack.encode());
+                    self.push_log(
+                        LogLevel::Info,
+                        "command.rs",
+                        "handle_command",
+                        "command executed",
+                    );
+                }
+                FrameType::FirmwareUpdate => {
+                    // 模拟固件写入成功,回带写入 offset 的 ACK
+                    let mut payload = Vec::with_capacity(5);
+                    payload.push(1);
+                    if raw.payload.len() >= 4 {
+                        payload.extend_from_slice(&raw.payload[..4]); // offset
+                    }
+                    let ack = RawFrame {
+                        frame_type: FrameType::AckFirmwareUpdate,
+                        payload,
+                    };
+                    self.priority_queue.push_back(ack.encode());
+                    self.push_log(
+                        LogLevel::Info,
+                        "command.rs",
+                        "handle_firmware",
+                        "firmware chunk written",
+                    );
+                }
                 _ => {}
             }
         }

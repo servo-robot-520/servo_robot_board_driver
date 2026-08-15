@@ -41,12 +41,16 @@ pub const SR_ERR_LOCK_POISONED: i32 = -10;
 pub const SR_ERR_NULL: i32 = -11;
 pub const SR_ERR_INVALID_ARG: i32 = -12;
 pub const SR_ERR_PANIC: i32 = -13;
+pub const SR_ERR_ALREADY_STARTED: i32 = -14;
 
 // ═══ 不透明句柄 ═══
 
 /// C 侧不透明句柄(头文件 `typedef struct sr_driver sr_driver;`)
+///
+/// `inner` 用 `Mutex` 包裹:FFI 层所有操作通过 `&SrDriver` + 内部锁访问,
+/// 避免多线程并发调用时对裸指针产生别名 `&mut`(UB)。
 pub struct SrDriver {
-    pub(crate) inner: Driver,
+    pub(crate) inner: Mutex<Driver>,
     pub(crate) last_error: Mutex<String>,
     pub(crate) callbacks: Arc<Mutex<CallbackTable>>,
 }
@@ -183,10 +187,12 @@ fn err_code(e: &DriverError) -> i32 {
         DriverError::Frame(_) => SR_ERR_FRAME,
         DriverError::TransportClosed => SR_ERR_TRANSPORT_CLOSED,
         DriverError::Timeout => SR_ERR_TIMEOUT,
+        DriverError::IoTimeout => SR_ERR_TIMEOUT,
         DriverError::CrcMismatch { .. } => SR_ERR_CRC,
         DriverError::PayloadTooShort { .. } => SR_ERR_PAYLOAD_TOO_SHORT,
         DriverError::UnknownFrameType(_) => SR_ERR_UNKNOWN_FRAME,
         DriverError::NotRunning => SR_ERR_NOT_RUNNING,
+        DriverError::AlreadyStarted => SR_ERR_ALREADY_STARTED,
         DriverError::LockPoisoned => SR_ERR_LOCK_POISONED,
     }
 }
@@ -205,18 +211,25 @@ fn write_err_buf(buf: *mut c_char, len: usize, msg: &str) {
 }
 
 fn set_last_error(d: *mut SrDriver, msg: &str) {
-    if let Ok(mut le) = unsafe { &mut *d }.last_error.lock() {
+    if let Ok(mut le) = unsafe { &*d }.last_error.lock() {
         le.clear();
         le.push_str(msg);
     }
 }
 
-/// 统一入口:null 检查 + catch_unwind + 错误码/错误信息落盘
-fn guard(d: *mut SrDriver, f: impl FnOnce(&mut SrDriver) -> Result<(), DriverError>) -> i32 {
+/// 统一入口:null 检查 + catch_unwind + 错误码/错误信息落盘。
+/// 闭包接收 `&mut Driver`(内部锁已持有),禁止在闭包内再锁 handle。
+fn guard(d: *mut SrDriver, f: impl FnOnce(&mut Driver) -> Result<(), DriverError>) -> i32 {
     if d.is_null() {
         return SR_ERR_NULL;
     }
-    match catch_unwind(AssertUnwindSafe(|| unsafe { f(&mut *d) })) {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut inner = unsafe { &*d }
+            .inner
+            .lock()
+            .map_err(|_| DriverError::LockPoisoned)?;
+        f(&mut inner)
+    })) {
         Ok(Ok(())) => SR_OK,
         Ok(Err(e)) => {
             let code = err_code(&e);
@@ -309,6 +322,9 @@ pub extern "C" fn sr_driver_open_reconnect(
         if port.is_null() {
             return Err("port is NULL".to_string());
         }
+        if !backoff_multiplier.is_finite() || backoff_multiplier < 0.0 {
+            return Err("backoff_multiplier must be finite and >= 0".to_string());
+        }
         let port_name = unsafe { CStr::from_ptr(port) }
             .to_string_lossy()
             .into_owned();
@@ -342,7 +358,7 @@ fn build_sr_driver(inner: Driver) -> *mut SrDriver {
     let callbacks = Arc::new(Mutex::new(CallbackTable(None)));
     inner.register_callback(CffiCallback::new(Arc::clone(&callbacks)));
     Box::into_raw(Box::new(SrDriver {
-        inner,
+        inner: Mutex::new(inner),
         last_error: Mutex::new(String::new()),
         callbacks,
     }))
@@ -359,12 +375,12 @@ pub extern "C" fn sr_driver_free(d: *mut SrDriver) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sr_driver_start(d: *mut SrDriver) -> i32 {
-    guard(d, |d| d.inner.start())
+    guard(d, |d| d.start())
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn sr_driver_stop(d: *mut SrDriver) -> i32 {
-    guard(d, |d| d.inner.stop())
+    guard(d, |d| d.stop())
 }
 
 // ═══ 配置 ═══
@@ -377,7 +393,7 @@ pub extern "C" fn sr_driver_write_config(d: *mut SrDriver, cfg: SrConfig) -> i32
     let Some(config) = config_from_sr(cfg) else {
         return SR_ERR_INVALID_ARG;
     };
-    guard(d, |d| d.inner.write_config(config))
+    guard(d, |d| d.write_config(config))
 }
 
 #[unsafe(no_mangle)]
@@ -396,7 +412,7 @@ pub extern "C" fn sr_driver_write_config_sync(
         return SR_ERR_NULL;
     }
     guard(d, |d| {
-        let ok = d.inner.write_config_sync(config)?;
+        let ok = d.write_config_sync(config)?;
         unsafe { *out_success = ok as u8 }
         Ok(())
     })
@@ -414,7 +430,7 @@ pub extern "C" fn sr_driver_query_config(d: *mut SrDriver, typ: u8, out: *mut Sr
         return SR_ERR_NULL;
     }
     guard(d, |d| {
-        let cfg = d.inner.query_config_sync(ct)?;
+        let cfg = d.query_config_sync(ct)?;
         unsafe { *out = to_sr_config(cfg) }
         Ok(())
     })
@@ -429,7 +445,7 @@ pub extern "C" fn sr_driver_query_all_configs(
         return SR_ERR_NULL;
     }
     guard(d, |d| {
-        let snap = d.inner.query_all_configs_sync()?;
+        let snap = d.query_all_configs_sync()?;
         unsafe { *out = to_sr_board_config(snap) }
         Ok(())
     })
@@ -452,7 +468,7 @@ pub extern "C" fn sr_driver_forward_servo(
         unsafe { std::slice::from_raw_parts(data, len) }
     };
     let cmd = ServoCmdWrapper::new(data.to_vec());
-    guard(d, |d| d.inner.forward_servo(&cmd))
+    guard(d, |d| d.forward_servo(&cmd))
 }
 
 #[unsafe(no_mangle)]
@@ -474,9 +490,11 @@ pub extern "C" fn sr_driver_forward_servo_sync(
     };
     let cmd = ServoCmdWrapper::new(data.to_vec());
     guard(d, |d| {
-        let ack = d.inner.forward_servo_sync(&cmd)?;
+        let ack = d.forward_servo_sync(&cmd)?;
         let ack_data = ack.data();
         if ack_data.len() > cap {
+            // 先写回实际长度,调用方可据此扩容重试
+            unsafe { *out_len = ack_data.len() };
             return Err(DriverError::PayloadTooShort {
                 expected: ack_data.len(),
                 got: cap,
@@ -500,7 +518,7 @@ pub extern "C" fn sr_driver_send_command(d: *mut SrDriver, cmd: u8) -> i32 {
     let Some(ct) = CommandType::from_u8(cmd) else {
         return SR_ERR_INVALID_ARG;
     };
-    guard(d, |d| d.inner.send_command(&Command::new(ct)))
+    guard(d, |d| d.send_command(&Command::new(ct)))
 }
 
 #[unsafe(no_mangle)]
@@ -519,7 +537,7 @@ pub extern "C" fn sr_driver_send_command_sync(
         return SR_ERR_NULL;
     }
     guard(d, |d| {
-        let ok = d.inner.send_command_sync(&Command::new(ct))?;
+        let ok = d.send_command_sync(&Command::new(ct))?;
         unsafe { *out_success = ok as u8 }
         Ok(())
     })
@@ -542,7 +560,7 @@ pub extern "C" fn sr_driver_firmware_update(
     } else {
         unsafe { std::slice::from_raw_parts(data, len) }
     };
-    guard(d, |d| d.inner.firmware_update(offset, data))
+    guard(d, |d| d.firmware_update(offset, data))
 }
 
 #[unsafe(no_mangle)]
@@ -565,7 +583,7 @@ pub extern "C" fn sr_driver_firmware_update_sync(
         unsafe { std::slice::from_raw_parts(data, len) }
     };
     guard(d, |d| {
-        let ok = d.inner.firmware_update_sync(offset, data)?;
+        let ok = d.firmware_update_sync(offset, data)?;
         unsafe { *out_success = ok as u8 }
         Ok(())
     })
@@ -579,9 +597,9 @@ pub extern "C" fn sr_driver_set_callbacks(d: *mut SrDriver, cbs: *const SrCallba
     if d.is_null() || cbs.is_null() {
         return SR_ERR_NULL;
     }
-    guard(d, |d| {
+    guard(d, |_| {
         let table = unsafe { *cbs };
-        let mut slot = d
+        let mut slot = unsafe { &*d }
             .callbacks
             .lock()
             .map_err(|_| DriverError::LockPoisoned)?;
@@ -600,7 +618,7 @@ pub extern "C" fn sr_driver_last_error(
     if d.is_null() || buf.is_null() || len == 0 {
         return SR_ERR_NULL;
     }
-    let msg = match unsafe { &mut *d }.last_error.lock() {
+    let msg = match unsafe { &*d }.last_error.lock() {
         Ok(m) => m.clone(),
         Err(_) => "lock poisoned".to_string(),
     };
@@ -621,7 +639,7 @@ mod tests {
         let callbacks = Arc::new(Mutex::new(CallbackTable(None)));
         inner.register_callback(CffiCallback::new(Arc::clone(&callbacks)));
         SrDriver {
-            inner,
+            inner: Mutex::new(inner),
             last_error: Mutex::new(String::new()),
             callbacks,
         }
@@ -658,6 +676,36 @@ mod tests {
         assert!(d.is_null());
         let msg = unsafe { CStr::from_ptr(err_buf.as_ptr()) }.to_string_lossy();
         assert!(!msg.is_empty(), "err_buf should be populated");
+    }
+
+    #[test]
+    fn test_open_reconnect_invalid_backoff() {
+        let mut err_buf = [0 as c_char; 64];
+        // 负退避因子:构造期拒绝,避免重连线程 panic
+        let d = sr_driver_open_reconnect(
+            b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
+            115200,
+            3,
+            10,
+            -1.0,
+            100,
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        );
+        assert!(d.is_null());
+        assert!(!unsafe { CStr::from_ptr(err_buf.as_ptr()) }.to_string_lossy().is_empty());
+        // NaN 同样拒绝
+        let d = sr_driver_open_reconnect(
+            b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
+            115200,
+            3,
+            10,
+            f32::NAN,
+            100,
+            err_buf.as_mut_ptr(),
+            err_buf.len(),
+        );
+        assert!(d.is_null());
     }
 
     #[test]
@@ -765,8 +813,8 @@ mod tests {
     fn test_last_error() {
         let d = boxed_ptr();
         assert_eq!(sr_driver_start(d), SR_OK);
-        // 重复 start → NotRunning
-        assert_eq!(sr_driver_start(d), SR_ERR_NOT_RUNNING);
+        // 重复 start → AlreadyStarted
+        assert_eq!(sr_driver_start(d), SR_ERR_ALREADY_STARTED);
         let mut buf = [0 as c_char; 64];
         assert_eq!(sr_driver_last_error(d, buf.as_mut_ptr(), buf.len()), SR_OK);
         let msg = unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy();

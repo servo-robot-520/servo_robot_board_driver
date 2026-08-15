@@ -11,7 +11,9 @@
  * 3. 回调参数指针仅在回调执行期间有效,不要跨调用保存。
  * 4. 同步函数阻塞 ≤1s(驱动默认超时),不要在实时路径调用。
  * 5. 同一句柄的所有调用线程安全(内部有锁),但回调线程与调用线程并存。
- * 6. GPL-3 许可:链接本库进入闭源程序有许可影响。
+ * 6. 禁止在仍有其他线程调用该句柄时调用 sr_driver_free(use-after-free);
+ *    先 stop 并确保所有调用线程退出,再 free。
+ * 7. GPL-3 许可:链接本库进入闭源程序有许可影响。
  */
 #ifndef SERVO_ROBOT_DRIVER_H
 #define SERVO_ROBOT_DRIVER_H
@@ -42,6 +44,7 @@ enum {
     SR_ERR_NULL = -11,
     SR_ERR_INVALID_ARG = -12,
     SR_ERR_PANIC = -13,
+    SR_ERR_ALREADY_STARTED = -14,
 };
 
 /* ═══ 配置类型(ConfigType,0x10~0x37) ═══ */

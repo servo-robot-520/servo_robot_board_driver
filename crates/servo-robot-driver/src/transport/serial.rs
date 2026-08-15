@@ -43,6 +43,16 @@ impl SerialTransport {
     }
 }
 
+/// 读错误映射:超时转结构化 `IoTimeout`(驱动读循环据此静默重试),
+/// 其余保持 `Io`
+fn map_read_err(e: std::io::Error) -> DriverError {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        DriverError::IoTimeout
+    } else {
+        DriverError::Io(e.to_string())
+    }
+}
+
 /// 从 Read trait 对象读取一帧数据
 ///
 /// 统一的帧读取逻辑，供 SerialTransport 使用。
@@ -70,20 +80,20 @@ pub(crate) fn read_frame_from_reader(
 
     // 读取 TYPE
     let mut type_buf = [0u8; 1];
-    port.read_exact(&mut type_buf)?;
+    port.read_exact(&mut type_buf).map_err(map_read_err)?;
 
     // 读取 LEN (2 bytes, little-endian)
     let mut len_buf = [0u8; 2];
-    port.read_exact(&mut len_buf)?;
+    port.read_exact(&mut len_buf).map_err(map_read_err)?;
     let payload_len = u16::from_le_bytes(len_buf) as usize;
 
     // 读取 PAYLOAD
     let mut payload = vec![0u8; payload_len];
-    port.read_exact(&mut payload)?;
+    port.read_exact(&mut payload).map_err(map_read_err)?;
 
     // 读取 CRC (2 bytes)
     let mut crc_buf = [0u8; 2];
-    port.read_exact(&mut crc_buf)?;
+    port.read_exact(&mut crc_buf).map_err(map_read_err)?;
 
     // 组装完整帧
     let mut frame = Vec::with_capacity(4 + payload_len + 2);

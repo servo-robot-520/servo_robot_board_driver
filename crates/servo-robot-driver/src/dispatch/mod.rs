@@ -50,11 +50,14 @@ pub enum DriverEvent {
 
 /// 事件总线容量
 const EVENT_CHANNEL_CAPACITY: usize = 1024;
+/// ACK 通道容量(有界:无同步等待者时 ACK 可丢弃,防止长期运行内存增长)
+const ACK_CHANNEL_CAPACITY: usize = 64;
 
 /// 事件总线 — 连接传输层和回调系统
 ///
-/// - 主事件通道（bounded）：读线程发送事件，分发线程消费并触发回调
-/// - ACK 通道（unbounded）：供同步请求-响应等待
+/// - 主事件通道（bounded）：读线程发送事件，分发线程消费并触发回调；
+///   满时读线程用 try_send 丢弃(上行数据可丢,不能反向阻塞读线程)
+/// - ACK 通道（bounded）：供同步请求-响应等待；无等待者时 try_send 丢弃
 pub struct EventBus {
     /// 事件发送端（bounded，满时丢弃最旧事件）
     tx: Sender<DriverEvent>,
@@ -71,7 +74,7 @@ pub struct EventBus {
 impl EventBus {
     pub fn new() -> Self {
         let (tx, rx) = flume::bounded(EVENT_CHANNEL_CAPACITY);
-        let (ack_tx, ack_rx) = flume::unbounded();
+        let (ack_tx, ack_rx) = flume::bounded(ACK_CHANNEL_CAPACITY);
         EventBus {
             tx,
             rx,
@@ -117,6 +120,14 @@ impl EventBus {
     /// 接收一个事件（阻塞）
     pub fn recv(&self) -> Result<DriverEvent, DriverError> {
         self.rx.recv().map_err(|_| DriverError::TransportClosed)
+    }
+
+    /// 接收一个事件（带超时;超时返回 `DriverError::Timeout`）
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<DriverEvent, DriverError> {
+        self.rx.recv_timeout(timeout).map_err(|e| match e {
+            flume::RecvTimeoutError::Timeout => DriverError::Timeout,
+            flume::RecvTimeoutError::Disconnected => DriverError::TransportClosed,
+        })
     }
 
     /// 尝试接收一个事件（非阻塞）

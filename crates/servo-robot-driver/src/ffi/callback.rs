@@ -61,12 +61,17 @@ impl CffiCallback {
         CffiCallback { table }
     }
 
-    /// 取回调表并执行闭包;表为空或锁中毒时静默跳过
+    /// 取回调表并执行闭包。
+    ///
+    /// 表是 `Copy`,先拷贝出锁再调用,锁不跨 C 调用持有——否则回调内
+    /// 调 `sr_driver_set_callbacks`(锁同一把锁)会自死锁。表为空/锁中毒时跳过。
     fn with_table<R>(&self, f: impl FnOnce(&SrCallbacks) -> R) {
-        if let Ok(guard) = self.table.lock() {
-            if let Some(cb) = guard.0.as_ref() {
-                f(cb);
-            }
+        let cb = match self.table.lock() {
+            Ok(guard) => guard.0,
+            Err(_) => return,
+        };
+        if let Some(cb) = cb {
+            f(&cb);
         }
     }
 }

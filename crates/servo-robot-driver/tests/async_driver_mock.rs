@@ -114,16 +114,16 @@ async fn test_callback_fires() {
 }
 
 #[tokio::test]
-async fn test_send_command_sync_timeout() {
+async fn test_send_command_sync_success() {
     let driver = mock_driver();
     driver.start().await.unwrap();
 
-    // mock 不对 Command 帧回 ACK → 1s 超时
-    let err = driver
+    // mock 对 Command 帧回 AckCommand{success:true}
+    let ok = driver
         .send_command_sync(Command::new(servo_robot_driver::protocol::command::CommandType::Reset))
         .await
-        .expect_err("mock does not ACK command frames");
-    assert!(matches!(err, servo_robot_driver::DriverError::Timeout));
+        .expect("mock ACKs command frames");
+    assert!(ok);
 
     driver.stop().await.unwrap();
 }

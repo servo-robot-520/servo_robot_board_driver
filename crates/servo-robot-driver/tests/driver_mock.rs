@@ -357,3 +357,100 @@ fn test_driver_stop_and_restart() {
 
     driver.stop().unwrap();
 }
+
+#[test]
+fn test_driver_auto_reconnect() {
+    use servo_robot_driver::protocol::command::{Command, CommandType};
+    use servo_robot_driver::transport::FnTransportFactory;
+    use servo_robot_driver::{ReconnectConfig, Transport};
+
+    // 初始连接 3 帧后自动断开;工厂再次调用返回全新的正常 mock
+    let calls = Arc::new(AtomicU64::new(0));
+    let factory = {
+        let calls = calls.clone();
+        FnTransportFactory::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let mut m = MockTransport::new();
+            // 仅第一个实例开启自动断开
+            if calls.load(Ordering::SeqCst) == 1 {
+                m.set_auto_disconnect(3);
+            }
+            Ok(Box::new(m) as Box<dyn Transport>)
+        })
+    };
+    let config = ReconnectConfig::new(3).with_retry_interval(Duration::from_millis(10));
+    let mut driver = Driver::new_with_reconnect(factory, config);
+
+    driver.start().unwrap();
+    // 初始连接已建立
+    assert!(wait_until(Duration::from_secs(2), || driver.state().frame_count() > 0));
+
+    // 3 帧后断开 → 自动重连 → 恢复连接
+    assert!(
+        wait_until(Duration::from_secs(3), || !driver.state().is_connected()),
+        "should observe disconnect"
+    );
+    assert!(
+        wait_until(Duration::from_secs(3), || driver.state().is_connected()),
+        "should reconnect"
+    );
+    assert!(calls.load(Ordering::SeqCst) >= 2, "factory must be re-invoked for reconnect");
+
+    // 重连后仍能收帧
+    let before = driver.state().frame_count();
+    assert!(wait_until(Duration::from_secs(2), || driver.state().frame_count() > before));
+
+    // 恢复的实例上命令同步往返正常
+    let ok = driver
+        .send_command_sync(&Command::new(CommandType::Reset))
+        .unwrap();
+    assert!(ok, "command ACK after reconnect");
+
+    driver.stop().unwrap();
+}
+
+#[test]
+fn test_driver_reconnect_gives_up() {
+    use servo_robot_driver::transport::FnTransportFactory;
+    use servo_robot_driver::ReconnectConfig;
+
+    // 工厂永远失败,max_retries=1 → 重试耗尽后读循环退出,不再空转
+    let factory = FnTransportFactory::new(|| {
+        Err(servo_robot_driver::DriverError::TransportClosed)
+    });
+    let config = ReconnectConfig::new(1).with_retry_interval(Duration::from_millis(10));
+    let mut driver = Driver::new_with_reconnect(factory, config);
+
+    driver.start().unwrap();
+    // 初始连接失败 + 重试耗尽 → 状态为断开且保持
+    assert!(
+        wait_until(Duration::from_secs(2), || !driver.state().is_connected()),
+        "should give up and stay disconnected"
+    );
+    // 重试耗尽后读循环记录 TransportClosed 错误并退出
+    assert!(
+        wait_until(Duration::from_secs(2), || driver.state().last_error().is_some()),
+        "give-up should record TransportClosed error"
+    );
+    driver.stop().unwrap();
+}
+
+#[test]
+fn test_driver_command_and_firmware_sync() {
+    use servo_robot_driver::protocol::command::{Command, CommandType};
+
+    let mock = MockTransport::new();
+    let mut driver = Driver::new(mock);
+    driver.start().unwrap();
+
+    // mock 回 AckCommand{success:true}
+    let ok = driver.send_command_sync(&Command::new(CommandType::Reset)).unwrap();
+    assert!(ok);
+
+    // mock 回 AckFirmwareUpdate{success:true, offset}
+    let data = vec![0x11u8, 0x22, 0x33, 0x44];
+    let ok = driver.firmware_update_sync(0x1000, &data).unwrap();
+    assert!(ok, "firmware chunk ACK should succeed");
+
+    driver.stop().unwrap();
+}

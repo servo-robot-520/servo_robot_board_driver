@@ -92,7 +92,7 @@ impl Driver {
     /// 启动驱动（开启读取线程 + 分发线程）
     pub fn start(&mut self) -> Result<(), DriverError> {
         if self.running.load(Ordering::Relaxed) {
-            return Err(DriverError::NotRunning);
+            return Err(DriverError::AlreadyStarted);
         }
 
         // 检查是否有可用的传输层
@@ -377,14 +377,13 @@ impl Driver {
     /// 分发线程：从事件通道消费事件，触发所有注册的回调
     fn dispatch_loop(bus: Arc<EventBus>, running: Arc<AtomicBool>) {
         while running.load(Ordering::Relaxed) {
-            // 阻塞接收，不浪费 CPU；超时 100ms 以便检查 running 标志
-            match bus.try_recv() {
-                Ok(Some(event)) => {
+            // 阻塞接收,超时 100ms 以便检查 running 标志
+            match bus.recv_timeout(Duration::from_millis(100)) {
+                Ok(event) => {
                     bus.dispatch(&event);
                 }
-                Ok(None) => {
-                    // 通道为空，短暂休眠避免忙等
-                    std::thread::sleep(Duration::from_millis(1));
+                Err(DriverError::Timeout) => {
+                    // 通道空,继续循环检查 running 标志
                 }
                 Err(_) => {
                     // 通道已断开
@@ -421,15 +420,21 @@ impl Driver {
                     Some(t) => t,
                     None => {
                         // 传输层不可用，尝试重连
+                        state.set_connected(false);
                         drop(transport_guard);
                         if let Some(ref factory) = transport_factory {
-                            Self::attempt_reconnect(
+                            if !Self::attempt_reconnect(
                                 &transport,
                                 factory.as_ref(),
                                 &state,
                                 reconnect_config.as_ref(),
                                 &mut retry_count,
-                            );
+                            ) {
+                                let _ = bus
+                                    .sender()
+                                    .send(DriverEvent::Error(DriverError::TransportClosed));
+                                break;
+                            }
                         } else {
                             state.set_error(DriverError::TransportClosed);
                             let _ = bus
@@ -446,7 +451,7 @@ impl Driver {
                         retry_count = 0; // 成功读取，重置重试计数
                         data
                     }
-                    Err(DriverError::Io(ref e)) if e.contains("timed out") => {
+                    Err(DriverError::IoTimeout) => {
                         continue;
                     }
                     Err(DriverError::TransportClosed) => {
@@ -458,13 +463,18 @@ impl Driver {
                         // 尝试重连
                         if let Some(ref factory) = transport_factory {
                             drop(transport_guard);
-                            Self::attempt_reconnect(
+                            if !Self::attempt_reconnect(
                                 &transport,
                                 factory.as_ref(),
                                 &state,
                                 reconnect_config.as_ref(),
                                 &mut retry_count,
-                            );
+                            ) {
+                                let _ = bus
+                                    .sender()
+                                    .send(DriverEvent::Error(DriverError::TransportClosed));
+                                break;
+                            }
                         } else {
                             let _ = bus
                                 .sender()
@@ -498,37 +508,38 @@ impl Driver {
                     | DriverEvent::AckFirmwareUpdate { .. }
             );
 
-            // 发送到主事件通道（bounded，满时丢弃）
-            if bus.sender().send(event.clone()).is_err() {
-                log::warn!("Event channel full, event dropped");
+            // 发送到主事件通道（bounded，满时丢弃——try_send 不阻塞读线程，
+            // 否则慢分发会反向卡死串口读取导致线速下 MCU 侧缓冲溢出）
+            if bus.sender().try_send(event.clone()).is_err() {
+                log::debug!("Event channel full, event dropped");
             }
 
-            // ACK 事件同时发送到 ACK 通道（供同步等待使用）
+            // ACK 事件同时发送到 ACK 通道（bounded，无等待者时丢弃）
             if is_ack {
-                let _ = bus.ack_sender().send(event);
+                let _ = bus.ack_sender().try_send(event);
             }
         }
 
         log::info!("Read loop exited");
     }
 
-    /// 尝试重连
+    /// 尝试重连;返回 `false` 表示重试耗尽,调用方应退出读循环(避免空转)
     fn attempt_reconnect(
         transport: &Arc<Mutex<Option<Box<dyn Transport>>>>,
         factory: &dyn TransportFactory,
         state: &Arc<DriverState>,
         config: Option<&ReconnectConfig>,
         retry_count: &mut u32,
-    ) {
+    ) -> bool {
         let config = match config {
             Some(c) => c,
-            None => return,
+            None => return false,
         };
 
         if *retry_count >= config.max_retries {
             log::error!("Max retries ({}) reached", config.max_retries);
             state.set_error(DriverError::TransportClosed);
-            return;
+            return false;
         }
 
         let delay = config.delay_for_retry(*retry_count);
@@ -557,6 +568,7 @@ impl Driver {
                 *retry_count += 1;
             }
         }
+        true
     }
 }
 

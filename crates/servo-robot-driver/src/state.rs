@@ -99,7 +99,7 @@ impl DriverState {
         self.inner.lock().unwrap().power.clone()
     }
 
-    /// 获取温度数据（从 SystemInfo 中提取）
+    /// 获取系统信息快照(SystemInfo 含温度数据;thermal 已合并到 SystemInfo)
     pub fn thermal(&self) -> Option<crate::protocol::system::SystemInfo> {
         self.inner.lock().unwrap().system.clone()
     }

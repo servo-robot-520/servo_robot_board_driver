@@ -8,7 +8,6 @@
 //! 传输层抽象
 
 pub mod factory;
-pub mod frame_codec;
 #[cfg(feature = "mock")]
 pub mod mock;
 pub mod serial;

@@ -75,7 +75,7 @@ impl Transport for MockTransport {
             }
             None => {
                 std::thread::sleep(Duration::from_millis(5));
-                Err(DriverError::Io("timed out".to_string()))
+                Err(DriverError::IoTimeout)
             }
         }
     }

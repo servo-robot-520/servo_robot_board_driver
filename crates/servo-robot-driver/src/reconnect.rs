@@ -61,10 +61,17 @@ impl ReconnectConfig {
     }
 
     /// 计算第 n 次重试的等待时间
+    ///
+    /// 防御:退避因子为负值/NaN 时 `Duration::from_secs_f32` 会 panic,
+    /// 而此方法在重连线程(非 catch_unwind 覆盖)上被调用,panic = 驱动静默死亡。
     pub fn delay_for_retry(&self, retry_count: u32) -> Duration {
-        let delay =
+        let raw =
             self.retry_interval.as_secs_f32() * self.backoff_multiplier.powi(retry_count as i32);
-        let delay = Duration::from_secs_f32(delay);
+        let delay = if raw.is_finite() && raw >= 0.0 {
+            Duration::from_secs_f32(raw)
+        } else {
+            self.retry_interval
+        };
         delay.min(self.max_retry_interval)
     }
 }

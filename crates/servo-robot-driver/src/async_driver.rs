@@ -157,6 +157,7 @@ impl AsyncDriver {
     /// 获取状态快照(不需要 await)
     pub fn state(&self) -> Arc<DriverState> {
         self.inner.lock().map(|g| g.state()).unwrap_or_else(|_| {
+            log::warn!("AsyncDriver state lock poisoned, returning empty state");
             // 锁中毒:返回一个空状态,避免 panic 跨出门面
             Arc::new(DriverState::new())
         })
