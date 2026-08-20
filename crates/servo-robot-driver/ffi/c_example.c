@@ -3,8 +3,8 @@
  *
  * 编译:
  *   cargo build --release --features ffi
- *   gcc -Wall -Wextra -I../include c_example.c -o c_example
- *       -L ../../../target/release -lservo_robot_driver
+ *   gcc -Wall -Wextra -I../include c_example.c -o c_example \
+ *       -L ../../../target/release -lservo_robot_driver \
  *       -Wl,-rpath,$PWD/../../../target/release
  *
  * 运行(真实设备):
@@ -26,6 +26,8 @@ typedef struct {
     uint64_t imu_count;
     uint64_t power_count;
     uint64_t battery_count;
+    uint64_t diagnostic_count;
+    uint64_t response_count;
     uint64_t log_count;
 } callback_ctx;
 
@@ -42,7 +44,6 @@ static void on_power(void* userdata, const sr_power* data) {
     callback_ctx* ctx = (callback_ctx*)userdata;
     ctx->power_count++;
     if (ctx->power_count <= 3) {
-        /* 协议约定:电压/电流原始值 = 实际值 × 10(与 Rust Display 一致) */
         printf("[PWR] servo %5.1f V / %5.1f A, bat %5.1f V\n",
                data->servo_voltage_mv / 10.0f, data->servo_current_ma / 10.0f,
                data->bat_voltage_mv / 10.0f);
@@ -55,21 +56,49 @@ static void on_battery(void* userdata, const sr_battery_state* state) {
     if (ctx->battery_count <= 3) {
         printf("[BAT] %u%%, temp %d.%d C, %u cells\n",
                state->percentage, state->temperature / 10,
-               state->temperature % 10, state->cell_count);
+               state->temperature % 10, (unsigned)state->cell_count);
     }
+}
+
+static void on_device_info(void* userdata, const sr_device_info* info) {
+    (void)userdata;
+    printf("[DEVICE] id=0x%04x uid=0x%08x imu=0x%02x fw=%u.%u.%u "
+           "ram=%uKB flash:boot=%u app=%u ota=%u user=%uKB\n",
+           info->device_id, info->uid, info->imu_id,
+           info->fw_major, info->fw_minor, info->fw_patch,
+           info->ram_kb, info->flash_boot_kb, info->flash_app_kb,
+           info->flash_ota_kb, info->flash_user_kb);
+}
+
+static void on_diagnostic(void* userdata, const sr_diagnostic* diag) {
+    callback_ctx* ctx = (callback_ctx*)userdata;
+    ctx->diagnostic_count++;
+    if (ctx->diagnostic_count <= 3) {
+        printf("[DIAG] cpu=%u%% uptime=%us heap=%uKB mcu=%.1fC\n",
+               diag->cpu_usage_percent, diag->uptime_s,
+               diag->free_heap_kb, diag->temp_mcu / 10.0f);
+    }
+}
+
+static void on_response(void* userdata, const sr_response* resp) {
+    callback_ctx* ctx = (callback_ctx*)userdata;
+    ctx->response_count++;
+    printf("[RESP] kind=%u success=%u data_len=%zu\n",
+           resp->request_kind, resp->success, resp->data_len);
 }
 
 static void on_log(void* userdata, const sr_log_message* msg) {
     callback_ctx* ctx = (callback_ctx*)userdata;
     ctx->log_count++;
-    printf("[BOARD LOG] %s::%s: %s\n",
+    printf("[LOG] %s::%s: %s\n",
            msg->file_name ? msg->file_name : "?",
-           msg->fun_name ? msg->fun_name : "?", msg->msg ? msg->msg : "");
+           msg->fun_name ? msg->fun_name : "?",
+           msg->msg ? msg->msg : "");
 }
 
 static void on_error(void* userdata, int error_code) {
     (void)userdata;
-    fprintf(stderr, "[DRIVER ERROR] code=%d\n", error_code);
+    fprintf(stderr, "[ERROR] code=%d\n", error_code);
 }
 
 static const char* err_name(int rc) {
@@ -91,9 +120,14 @@ static const char* err_name(int rc) {
 }
 
 int main(int argc, char** argv) {
+    /* 查询驱动版本 */
+    sr_version ver = sr_driver_version();
+    printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
     const char* port = argc > 1 ? argv[1] : "/dev/ttyUSB0";
     uint32_t baud = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 10) : 115200;
 
+    /* 打开串口（不自动重连） */
     char err[256];
     sr_driver* d = sr_driver_open(port, baud, err, sizeof err);
     if (d == NULL) {
@@ -101,14 +135,17 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    /* 注册回调(全 NULL 的槽位被忽略) */
-    callback_ctx ctx = {0, 0, 0, 0};
+    /* 注册回调 */
+    callback_ctx ctx = {0};
     sr_callbacks cbs;
     memset(&cbs, 0, sizeof cbs);
     cbs.userdata = &ctx;
     cbs.on_imu_data = on_imu;
     cbs.on_power_data = on_power;
     cbs.on_battery_state = on_battery;
+    cbs.on_device_info = on_device_info;
+    cbs.on_diagnostic = on_diagnostic;
+    cbs.on_response = on_response;
     cbs.on_log = on_log;
     cbs.on_error = on_error;
     if (sr_driver_set_callbacks(d, &cbs) != SR_OK) {
@@ -117,14 +154,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    /* 启动(读线程 + 分发线程) */
+    /* 启动 */
     if (sr_driver_start(d) != SR_OK) {
         fprintf(stderr, "FATAL: start failed\n");
         sr_driver_free(d);
         return 1;
     }
 
-    /* 查询全部配置(同步,阻塞 ≤1s) */
+    /* 查询全部配置 */
     sr_board_config cfg;
     memset(&cfg, 0, sizeof cfg);
     int rc = sr_driver_query_all_configs(d, &cfg);
@@ -136,29 +173,29 @@ int main(int argc, char** argv) {
                cfg.charge_stop_percentage, cfg.power_servo_on ? "ON" : "OFF");
     }
 
-    /* 写配置并等待确认(同步) */
+    /* 写配置 */
     uint8_t ok = 0;
     sr_config sc = {.typ = SR_CONFIG_SERVO_BAUD_RATE, .value = 1000000.0f};
     rc = sr_driver_write_config_sync(d, sc, &ok);
     printf("write_config(baud=1000000): %s\n",
            rc != SR_OK ? err_name(rc) : (ok ? "ACK" : "NACK"));
 
-    /* 舵机命令透传(不等待应答;字节内容取决于舵机协议) */
-    const uint8_t servo_cmd[] = {0x01, 0x02}; /* 示例字节,按实际协议替换 */
-    rc = sr_driver_forward_servo(d, servo_cmd, sizeof servo_cmd);
-    if (rc != SR_OK) {
-        printf("forward_servo: %s\n", err_name(rc));
-    }
-
-    /* 收 1 秒数据,观察回调 */
+    /* 收 1 秒数据 */
     sleep(1);
-    printf("received %lu imu, %lu power, %lu battery, %lu log frames\n",
-           ctx.imu_count, ctx.power_count, ctx.battery_count, ctx.log_count);
+    printf("received %lu imu, %lu power, %lu battery, %lu diag, %lu resp, %lu log\n",
+           ctx.imu_count, ctx.power_count, ctx.battery_count,
+           ctx.diagnostic_count, ctx.response_count, ctx.log_count);
 
-    /* 停止 + 释放(必须最后调用) */
-    if (sr_driver_stop(d) != SR_OK) {
-        fprintf(stderr, "FATAL: stop failed\n");
+    /* 重连示例（上层自行控制） */
+    /*
+    rc = sr_driver_connect(d, "/dev/ttyUSB1", 115200);
+    if (rc != SR_OK) {
+        printf("reconnect failed: %s\n", err_name(rc));
     }
+    */
+
+    /* 停止 + 释放 */
+    sr_driver_stop(d);
     sr_driver_free(d);
     printf("== done ==\n");
     return 0;

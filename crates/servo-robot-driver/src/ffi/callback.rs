@@ -4,8 +4,8 @@
 //! 且回调内禁止调用任何 `sr_driver_*` 函数(尤其 `sr_driver_free`,会自死锁)。
 
 use super::{
-    SrBatteryState, SrBoardConfig, SrBoardEvent, SrConfig, SrDeviceInfo, SrDiagnostic, SrImu,
-    SrLogMessage, SrPower, SrResponse, err_code,
+    SrBatteryState, SrBoardConfig, SrBoardEvent, SrDeviceInfo, SrDiagnostic, SrImu, SrLogMessage,
+    SrPower, SrResponse, err_code,
 };
 use crate::dispatch::callback::DriverCallback;
 use crate::error::DriverError;

@@ -13,14 +13,14 @@ pub mod callback;
 use crate::driver::Driver;
 use crate::error::DriverError;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
-use crate::transport::Transport;
+use crate::protocol::request::RequestKind;
+use crate::protocol::servo::ServoCmdWrapper;
 use crate::transport::serial::SerialTransport;
 use callback::{CallbackTable, CffiCallback, SrCallbacks};
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 // ═══ 错误码(与头文件 SR_ERR_* 严格一致)═══
 
@@ -542,10 +542,10 @@ pub extern "C" fn sr_driver_send_command(d: *mut SrDriver, cmd: u8) -> i32 {
     if d.is_null() {
         return SR_ERR_NULL;
     }
-    let Some(ct) = CommandType::from_u8(cmd) else {
+    let Some(kind) = RequestKind::from_u8(cmd) else {
         return SR_ERR_INVALID_ARG;
     };
-    guard(d, |d| d.send_command(&Command::new(ct)))
+    guard(d, |d| d.send_command(kind))
 }
 
 #[unsafe(no_mangle)]
@@ -557,14 +557,14 @@ pub extern "C" fn sr_driver_send_command_sync(
     if d.is_null() {
         return SR_ERR_NULL;
     }
-    let Some(ct) = CommandType::from_u8(cmd) else {
+    let Some(kind) = RequestKind::from_u8(cmd) else {
         return SR_ERR_INVALID_ARG;
     };
     if out_success.is_null() {
         return SR_ERR_NULL;
     }
     guard(d, |d| {
-        let ok = d.send_command_sync(&Command::new(ct))?;
+        let ok = d.send_command_sync(kind)?;
         unsafe { *out_success = ok as u8 }
         Ok(())
     })

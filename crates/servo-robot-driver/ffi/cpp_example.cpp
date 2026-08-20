@@ -7,8 +7,8 @@
 //
 // 编译:
 //   cargo build --release --features ffi
-//   g++ -std=c++17 -Wall -Wextra -I../include cpp_example.cpp -o cpp_example
-//       -L ../../../target/release -lservo_robot_driver
+//   g++ -std=c++17 -Wall -Wextra -I../include cpp_example.cpp -o cpp_example \
+//       -L ../../../target/release -lservo_robot_driver \
 //       -Wl,-rpath,$PWD/../../../target/release
 //
 // 运行(真实设备):
@@ -65,6 +65,9 @@ struct CallbackCtx {
     std::function<void(const sr_imu*)> on_imu;
     std::function<void(const sr_power*)> on_power;
     std::function<void(const sr_battery_state*)> on_battery;
+    std::function<void(const sr_device_info*)> on_device_info;
+    std::function<void(const sr_diagnostic*)> on_diagnostic;
+    std::function<void(const sr_response*)> on_response;
     std::function<void(const sr_log_message*)> on_log;
     std::function<void(int)> on_error;
 };
@@ -78,6 +81,15 @@ void power_thunk(void* u, const sr_power* d) {
 }
 void battery_thunk(void* u, const sr_battery_state* d) {
     if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_battery) c->on_battery(d);
+}
+void device_info_thunk(void* u, const sr_device_info* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_device_info) c->on_device_info(d);
+}
+void diagnostic_thunk(void* u, const sr_diagnostic* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_diagnostic) c->on_diagnostic(d);
+}
+void response_thunk(void* u, const sr_response* r) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_response) c->on_response(r);
 }
 void log_thunk(void* u, const sr_log_message* d) {
     if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_log) c->on_log(d);
@@ -116,6 +128,9 @@ public:
         ctx_.on_imu = [this](const sr_imu* d) { onImu(d); };
         ctx_.on_power = [this](const sr_power* d) { onPower(d); };
         ctx_.on_battery = [this](const sr_battery_state* d) { onBattery(d); };
+        ctx_.on_device_info = [this](const sr_device_info* d) { onDeviceInfo(d); };
+        ctx_.on_diagnostic = [this](const sr_diagnostic* d) { onDiagnostic(d); };
+        ctx_.on_response = [this](const sr_response* r) { onResponse(r); };
         ctx_.on_log = [this](const sr_log_message* d) { onLog(d); };
         ctx_.on_error = [this](int code) { onError(code); };
 
@@ -124,17 +139,19 @@ public:
         cbs.on_imu_data = imu_thunk;
         cbs.on_power_data = power_thunk;
         cbs.on_battery_state = battery_thunk;
+        cbs.on_device_info = device_info_thunk;
+        cbs.on_diagnostic = diagnostic_thunk;
+        cbs.on_response = response_thunk;
         cbs.on_log = log_thunk;
         cbs.on_error = error_thunk;
         SrDriver::throw_on_error(sr_driver_set_callbacks(driver_.get(), &cbs),
                                  "set_callbacks");
     }
 
-    // 完整生命周期(ROS2 中:start 在节点构造/on_configure,stop 在 on_shutdown)
     void run() {
         SrDriver::throw_on_error(sr_driver_start(driver_.get()), "start");
 
-        // 查询全部配置(同步,阻塞 ≤1s)
+        // 查询全部配置
         sr_board_config cfg{};
         int rc = sr_driver_query_all_configs(driver_.get(), &cfg);
         if (rc != SR_OK) {
@@ -147,7 +164,7 @@ public:
                         cfg.power_servo_on ? "ON" : "OFF");
         }
 
-        // 写配置并等待确认(同步)
+        // 写配置
         uint8_t ok = 0;
         sr_config sc{};
         sc.typ = SR_CONFIG_SERVO_BAUD_RATE;
@@ -156,24 +173,19 @@ public:
         std::printf("write_config(baud=1000000): %s\n",
                     rc != SR_OK ? err_name(rc) : (ok ? "ACK" : "NACK"));
 
-        // 舵机命令透传(不等待应答;字节内容取决于舵机协议)
-        const uint8_t servo_cmd[] = {0x01, 0x02}; // 示例字节,按实际协议替换
-        rc = sr_driver_forward_servo(driver_.get(), servo_cmd, sizeof servo_cmd);
-        if (rc != SR_OK) {
-            std::printf("forward_servo: %s\n", err_name(rc));
-        }
-
-        // 收 1 秒数据,观察成员回调(ROS2 中由 spin 驱动,无需显式 sleep)
+        // 收 1 秒数据
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        std::printf("received %lu imu, %lu power, %lu battery, %lu log frames\n",
-                    imu_count_.load(), power_count_.load(),
-                    battery_count_.load(), log_count_.load());
+        std::printf("received %lu imu, %lu power, %lu battery, %lu diag, %lu resp, %lu log\n",
+                    imu_count_.load(), power_count_.load(), battery_count_.load(),
+                    diagnostic_count_.load(), response_count_.load(), log_count_.load());
+
+        // 重连示例（上层自行控制）
+        // rc = sr_driver_connect(driver_.get(), "/dev/ttyUSB1", 115200);
 
         SrDriver::throw_on_error(sr_driver_stop(driver_.get()), "stop");
     }
 
 private:
-    // ═══ 类内成员回调(ROS2 中替换 printf 为 topic 发布 / RCLCPP_INFO) ═══
     void onImu(const sr_imu* data) {
         imu_count_.fetch_add(1, std::memory_order_relaxed);
         if (imu_count_.load(std::memory_order_relaxed) <= 3) {
@@ -186,7 +198,6 @@ private:
     void onPower(const sr_power* data) {
         power_count_.fetch_add(1, std::memory_order_relaxed);
         if (power_count_.load(std::memory_order_relaxed) <= 3) {
-            // 协议约定:电压/电流原始值 = 实际值 × 10(与 Rust Display 一致)
             std::printf("[PWR] servo %5.1f V / %5.1f A, bat %5.1f V\n",
                         data->servo_voltage_mv / 10.0f,
                         data->servo_current_ma / 10.0f,
@@ -199,40 +210,70 @@ private:
         if (battery_count_.load(std::memory_order_relaxed) <= 3) {
             std::printf("[BAT] %u%%, temp %d.%d C, %u cells\n",
                         state->percentage, state->temperature / 10,
-                        state->temperature % 10, state->cell_count);
+                        state->temperature % 10, (unsigned)state->cell_count);
         }
+    }
+
+    void onDeviceInfo(const sr_device_info* info) {
+        std::printf("[DEVICE] id=0x%04x uid=0x%08x fw=%u.%u.%u "
+                    "ram=%uKB flash:boot=%u app=%u ota=%u user=%uKB\n",
+                    info->device_id, info->uid,
+                    info->fw_major, info->fw_minor, info->fw_patch,
+                    info->ram_kb, info->flash_boot_kb, info->flash_app_kb,
+                    info->flash_ota_kb, info->flash_user_kb);
+    }
+
+    void onDiagnostic(const sr_diagnostic* diag) {
+        diagnostic_count_.fetch_add(1, std::memory_order_relaxed);
+        if (diagnostic_count_.load(std::memory_order_relaxed) <= 3) {
+            std::printf("[DIAG] cpu=%u%% uptime=%us heap=%uKB mcu=%.1fC\n",
+                        diag->cpu_usage_percent, diag->uptime_s,
+                        diag->free_heap_kb, diag->temp_mcu / 10.0f);
+        }
+    }
+
+    void onResponse(const sr_response* resp) {
+        response_count_.fetch_add(1, std::memory_order_relaxed);
+        std::printf("[RESP] kind=%u success=%u data_len=%zu\n",
+                    resp->request_kind, resp->success, resp->data_len);
     }
 
     void onLog(const sr_log_message* msg) {
         log_count_.fetch_add(1, std::memory_order_relaxed);
-        std::printf("[BOARD LOG] %s::%s: %s\n",
+        std::printf("[LOG] %s::%s: %s\n",
                     msg->file_name ? msg->file_name : "?",
-                    msg->fun_name ? msg->fun_name : "?", msg->msg ? msg->msg : "");
+                    msg->fun_name ? msg->fun_name : "?",
+                    msg->msg ? msg->msg : "");
     }
 
     void onError(int code) {
-        std::fprintf(stderr, "[DRIVER ERROR] code=%d\n", code);
+        std::fprintf(stderr, "[ERROR] code=%d\n", code);
     }
 
     // 成员顺序:ctx_ 先于 driver_(见类注释)
     CallbackCtx ctx_;
     SrDriver driver_;
 
-    // 跨线程计数:分发线程写,主线程读 → 必须原子
     std::atomic<uint64_t> imu_count_{0};
     std::atomic<uint64_t> power_count_{0};
     std::atomic<uint64_t> battery_count_{0};
+    std::atomic<uint64_t> diagnostic_count_{0};
+    std::atomic<uint64_t> response_count_{0};
     std::atomic<uint64_t> log_count_{0};
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
+    // 查询驱动版本
+    sr_version ver = sr_driver_version();
+    std::printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
     const char* port = argc > 1 ? argv[1] : "/dev/ttyUSB0";
     const uint32_t baud = argc > 2 ? std::strtoul(argv[2], nullptr, 10) : 115200;
 
     try {
-        std::printf("== servo-robot-driver C++ example (class-based callbacks) ==\n");
+        std::printf("== servo-robot-driver C++ example ==\n");
         ServoRobotDriverNode node(port, baud);
         node.run();
         std::printf("== done ==\n");
