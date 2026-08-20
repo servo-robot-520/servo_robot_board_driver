@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 /// 请求类型 — 下行 Request 帧 payload 首字节
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum RequestKind {
+pub enum RequestType {
     // ═══ 系统控制 (0x01~0x0F, fire-and-forget, 无应答) ═══
     /// 重启 MCU
     Reset = 0x01,
@@ -35,7 +35,7 @@ pub enum RequestKind {
     FirmwareUpdate = 0x21,
 }
 
-impl RequestKind {
+impl RequestType {
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             0x01 => Some(Self::Reset),
@@ -74,7 +74,7 @@ impl RequestKind {
     }
 }
 
-impl core::fmt::Display for RequestKind {
+impl core::fmt::Display for RequestType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.name())
     }
@@ -82,21 +82,21 @@ impl core::fmt::Display for RequestKind {
 
 /// Request 帧 — 统一的下行帧结构
 ///
-/// Wire format: FrameType(0x80) + payload[request_kind:1][data:N]
+/// Wire format: FrameType(0x80) + payload[request_type:1][data:N]
 #[derive(Debug, Clone)]
 pub struct Request {
-    pub kind: RequestKind,
+    pub kind: RequestType,
     /// 去掉 kind 首字节后的原始 payload
     pub data: Vec<u8>,
 }
 
 impl Request {
-    pub fn new(kind: RequestKind, data: Vec<u8>) -> Self {
+    pub fn new(kind: RequestType, data: Vec<u8>) -> Self {
         Self { kind, data }
     }
 
     /// 纯命令（无额外数据）: Reset, Shutdown, Ota, ConfigQueryAll, DeviceInfo
-    pub fn simple(kind: RequestKind) -> Self {
+    pub fn simple(kind: RequestType) -> Self {
         Self {
             kind,
             data: Vec::new(),
@@ -122,7 +122,7 @@ impl FromPayload for Request {
             });
         }
         let kind =
-            RequestKind::from_u8(payload[0]).ok_or(FrameError::PayloadDecode("Unknown request"))?;
+            RequestType::from_u8(payload[0]).ok_or(FrameError::PayloadDecode("Unknown request"))?;
         Ok(Self {
             kind,
             data: payload[1..].to_vec(),
@@ -136,21 +136,21 @@ mod tests {
 
     #[test]
     fn test_request_simple_encode_decode() {
-        let req = Request::simple(RequestKind::Reset);
+        let req = Request::simple(RequestType::Reset);
         let payload = req.to_payload();
         assert_eq!(payload, vec![0x01]);
         let decoded = Request::from_payload(&payload).unwrap();
-        assert_eq!(decoded.kind, RequestKind::Reset);
+        assert_eq!(decoded.kind, RequestType::Reset);
         assert!(decoded.data.is_empty());
     }
 
     #[test]
     fn test_request_with_data() {
-        let req = Request::new(RequestKind::ConfigQuery, vec![0x10]);
+        let req = Request::new(RequestType::ConfigQuery, vec![0x10]);
         let payload = req.to_payload();
         assert_eq!(payload, vec![0x11, 0x10]);
         let decoded = Request::from_payload(&payload).unwrap();
-        assert_eq!(decoded.kind, RequestKind::ConfigQuery);
+        assert_eq!(decoded.kind, RequestType::ConfigQuery);
         assert_eq!(decoded.data, vec![0x10]);
     }
 
@@ -160,20 +160,20 @@ mod tests {
     }
 
     #[test]
-    fn test_request_unknown_kind() {
+    fn test_request_unknown_type() {
         assert!(Request::from_payload(&[0xFF]).is_err());
     }
 
     #[test]
     fn test_expects_response() {
-        assert!(!RequestKind::Reset.expects_response());
-        assert!(!RequestKind::Shutdown.expects_response());
-        assert!(!RequestKind::Ota.expects_response());
-        assert!(RequestKind::ConfigWrite.expects_response());
-        assert!(RequestKind::ConfigQuery.expects_response());
-        assert!(RequestKind::ConfigQueryAll.expects_response());
-        assert!(RequestKind::DeviceInfo.expects_response());
-        assert!(RequestKind::ServoForward.expects_response());
-        assert!(RequestKind::FirmwareUpdate.expects_response());
+        assert!(!RequestType::Reset.expects_response());
+        assert!(!RequestType::Shutdown.expects_response());
+        assert!(!RequestType::Ota.expects_response());
+        assert!(RequestType::ConfigWrite.expects_response());
+        assert!(RequestType::ConfigQuery.expects_response());
+        assert!(RequestType::ConfigQueryAll.expects_response());
+        assert!(RequestType::DeviceInfo.expects_response());
+        assert!(RequestType::ServoForward.expects_response());
+        assert!(RequestType::FirmwareUpdate.expects_response());
     }
 }

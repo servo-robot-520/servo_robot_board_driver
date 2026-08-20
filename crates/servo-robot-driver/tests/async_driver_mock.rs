@@ -3,7 +3,7 @@
 #![cfg(all(feature = "mock", feature = "async"))]
 
 use servo_robot_driver::protocol::config::Config;
-use servo_robot_driver::protocol::request::RequestKind;
+use servo_robot_driver::protocol::request::RequestType;
 use servo_robot_driver::protocol::servo::ServoCmdWrapper;
 use servo_robot_driver::{AsyncDriver, DriverCallback, MockTransport};
 use std::sync::Arc;
@@ -120,7 +120,7 @@ async fn test_send_command_sync_success() {
 
     // mock 对 Request 帧回 Response(Reset, success=true)
     let ok = driver
-        .send_command_sync(RequestKind::Reset)
+        .send_command_sync(RequestType::Reset)
         .await
         .expect("mock ACKs command frames");
     assert!(ok);

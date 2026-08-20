@@ -23,7 +23,7 @@ pub mod servo;
 
 /// 便捷重导出
 pub use device_info::Version;
-pub use request::{Request, RequestKind};
+pub use request::{Request, RequestType};
 pub use response::Response;
 
 /// 通用枚举转换宏
