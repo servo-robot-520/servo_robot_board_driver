@@ -10,7 +10,7 @@
 
 | Crate | 说明 | 文档 |
 |-------|------|------|
-| [servo-robot-protocol](crates/servo-robot-protocol/README.md) | 协议层：帧格式、数据类型（IMU / Power / Battery / System / Event / Log / Config / Servo 等）、CRC 校验。`no_std` + `alloc` 兼容，同时支持 PC 与嵌入式平台 | [中文](crates/servo-robot-protocol/README.md) · [English](crates/servo-robot-protocol/README_en.md) |
+| [servo-robot-protocol](crates/servo-robot-protocol/README.md) | 协议层：帧格式、数据类型（IMU / Power / Battery / Diagnostic / DeviceInfo / Event / Log / Config / Servo 等）、CRC 校验。`no_std` + `alloc` 兼容，同时支持 PC 与嵌入式平台 | [中文](crates/servo-robot-protocol/README.md) · [English](crates/servo-robot-protocol/README_en.md) |
 | [servo-robot-driver](crates/servo-robot-driver/README.md) | 驱动层：串口通信、`DriverCallback` 回调、线程安全的状态快照、自动重连、模拟传输层、同步/异步双驱动（`Driver` / `AsyncDriver`） | [中文](crates/servo-robot-driver/README.md) · [English](crates/servo-robot-driver/README_en.md) |
 
 ```
@@ -37,7 +37,8 @@
 ## 特性
 
 - **帧协议**：`HEAD + TYPE + LEN + PAYLOAD + CRC` 帧格式，CRC-16/CCITT 校验
-- **完整数据类型**：IMU、Power、Battery、System（含温度）、Event、Log、Config、Servo、Command
+- **Request/Response 模型**：9 种帧类型（7 上行 + Request + Response），所有下行操作统一为 Request 帧，所有应答统一为 Response 帧
+- **完整数据类型**：IMU、Power、Battery、Diagnostic（运行时诊断）、DeviceInfo（设备标识）、Event、Log、Config、Servo
 - **`no_std` 兼容**：协议层可在嵌入式平台上使用（`embedded` feature）
 - **回调机制**：`DriverCallback` trait，板级日志经 `on_log` 分发，默认通过 `log` crate 输出
 - **状态快照**：线程安全的 `DriverState::snapshot()`，适合 TUI / ROS2 轮询高频数据
@@ -45,6 +46,7 @@
 - **自动重连**：可配置重试次数与指数退避策略
 - **模拟传输层**：`MockTransport` 模拟真实数据，便于开发与测试
 - **同步/异步双驱动**：`Driver` / `AsyncDriver`（`async` feature）
+- **C/C++ FFI**：`sr_driver_*` 系列函数，`sr_version` 版本查询，头文件兼容 C/C++
 
 ## 帧协议
 
@@ -63,29 +65,43 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 
 ## 帧类型
 
-> **注意**：`0x03` 为保留值（原 Thermal，已合并进 System）。
+### 上行帧（固件主动推送）
 
-| 类型 | 值 | 方向 | 说明 |
-|------|-----|------|------|
-| Imu | 0x01 | 上行 | IMU 惯性测量数据 |
-| Power | 0x02 | 上行 | 电源电气数据 |
-| Config | 0x04 | 上行 | 配置快照 |
-| Battery | 0x05 | 上行 | 电池状态 |
-| System | 0x06 | 上行 | 系统信息 + 温度数据 |
-| Event | 0x07 | 上行 | 事件 |
-| Log | 0x08 | 上行 | 日志消息 |
-| CfgWrite | 0x80 | 下行 | 写入配置 |
-| CfgQuery | 0x81 | 下行 | 查询单个配置 |
-| CfgQueryAll | 0x82 | 下行 | 查询所有配置 |
-| ServoForward | 0x83 | 下行 | 转发舵机命令 |
-| FirmwareUpdate | 0x84 | 下行 | 固件升级 |
-| Command | 0x85 | 下行 | 通用命令（复位 / 关机 / OTA）|
-| AckCfgWrite | 0xC0 | 应答 | 写入确认 |
-| AckCfgQuery | 0xC1 | 应答 | 单个配置响应 |
-| AckCfgQueryAll | 0xC2 | 应答 | 所有配置响应 |
-| AckServoCmd | 0xC3 | 应答 | 舵机命令响应 |
-| AckFirmwareUpdate | 0xC4 | 应答 | 固件升级响应 |
-| AckCommand | 0xC5 | 应答 | 命令响应 |
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Imu | 0x01 | IMU 惯性测量数据 |
+| Power | 0x02 | 电源电气数据 |
+| Config | 0x04 | 配置快照 |
+| Battery | 0x05 | 电池状态 |
+| Diagnostic | 0x06 | 运行时诊断（CPU/内存/错误计数/温度） |
+| Event | 0x07 | 板级事件 |
+| Log | 0x08 | 日志消息 |
+
+### 下行帧（PC → 固件）
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Request | 0x80 | 统一请求帧，payload 首字节为 RequestKind |
+
+### 应答帧（固件 → PC）
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Response | 0xC0 | 统一应答帧，payload 格式: `[request_kind:1][success:1][data:N]` |
+
+### RequestKind（Request payload 首字节）
+
+| 值 | 名称 | 需要应答 | 说明 |
+|----|------|----------|------|
+| 0x01 | Reset | ❌ | 重启 MCU（fire-and-forget） |
+| 0x02 | Shutdown | ❌ | 关机（fire-and-forget） |
+| 0x03 | Ota | ❌ | 触发 OTA 更新（fire-and-forget） |
+| 0x10 | ConfigWrite | ✅ | 写入单个配置项 |
+| 0x11 | ConfigQuery | ✅ | 查询单个配置项 |
+| 0x12 | ConfigQueryAll | ✅ | 查询所有配置 |
+| 0x13 | DeviceInfo | ✅ | 查询设备标识与内存布局 |
+| 0x20 | ServoForward | ✅ | 转发舵机命令 |
+| 0x21 | FirmwareUpdate | ✅ | 固件更新数据块 |
 
 ## 快速开始
 
@@ -127,6 +143,39 @@ driver.register_callback(MyCallback);
 driver.start()?;
 ```
 
+### 发送命令
+
+```rust
+use servo_robot_driver::protocol::request::RequestKind;
+
+// fire-and-forget（不等待应答）
+driver.send_command(RequestKind::Reset)?;
+
+// 等待应答
+let success = driver.send_command_sync(RequestKind::Reset)?;
+
+// 查询设备信息
+let response = driver.query_device_info()?;
+```
+
+### C/C++ FFI
+
+```c
+#include "servo_robot_driver.h"
+
+// 获取版本
+sr_version ver = sr_driver_version();
+printf("Driver v%u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
+// 打开串口
+char err[256];
+sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof(err));
+sr_driver_start(d);
+// ...
+sr_driver_stop(d);
+sr_driver_free(d);
+```
+
 ### 异步驱动（需 `async` feature）
 
 `AsyncDriver` 是同步 `Driver` 的薄封装：操作经 `spawn_blocking` 在 tokio 阻塞池执行，I/O 与回调仍在驱动专用线程上。
@@ -145,6 +194,7 @@ driver.start().await?;
 |-------|---------|------|
 | servo-robot-driver | `mock` | 启用 MockTransport 模拟传输层 |
 | servo-robot-driver | `async` | 启用 AsyncDriver（同步 Driver 的薄门面） |
+| servo-robot-driver | `ffi` | 启用 C FFI 包装层 |
 | servo-robot-protocol | `embedded` | 嵌入式模式（`no_std`）|
 
 ## 详细文档

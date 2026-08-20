@@ -8,7 +8,7 @@ Definition of communication protocol between ServoRobotBoard and host computer, 
 
 - `#![no_std]` compatible, supports embedded environments
 - Frame protocol parsing (HEAD + TYPE + LEN + PAYLOAD + CRC)
-- Complete data type definitions (IMU, Power, Battery, System incl. temperature, Event, Log, Config, Servo, Command)
+- Complete data type definitions (IMU, Power, Battery, Diagnostic (runtime diagnostics) + DeviceInfo (device identity), Event, Log, Config, Servo, Request/Response)
 - CRC-16/CCITT checksum
 - Platform switching via `embedded` feature
 
@@ -47,7 +47,7 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 
 ## Frame Types
 
-> **Note**: `0x03` is reserved (old Thermal, merged into System).
+> **Note**: `0x03` is reserved (old Thermal, merged into Diagnostic).
 
 | Type | Value | Direction | Description |
 |------|-------|-----------|-------------|
@@ -55,21 +55,38 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 | Power | 0x02 | Uplink | Power electrical data |
 | Config | 0x04 | Uplink | Config snapshot |
 | Battery | 0x05 | Uplink | Battery state |
-| System | 0x06 | Uplink | System info + temperature data |
+| Diagnostic | 0x06 | Uplink | Runtime diagnostics (CPU, memory, errors, temperatures) |
 | Event | 0x07 | Uplink | Event |
 | Log | 0x08 | Uplink | Log message |
-| CfgWrite | 0x80 | Downlink | Write config |
-| CfgQuery | 0x81 | Downlink | Query single config |
-| CfgQueryAll | 0x82 | Downlink | Query all configs |
-| ServoForward | 0x83 | Downlink | Forward servo command |
-| FirmwareUpdate | 0x84 | Downlink | Firmware data chunk for OTA |
-| Command | 0x85 | Downlink | One-shot command (Reset / Shutdown / OTA) |
-| AckCfgWrite | 0xC0 | Response | Write ACK |
-| AckCfgQuery | 0xC1 | Response | Single config response |
-| AckCfgQueryAll | 0xC2 | Response | All configs response |
-| AckServoCmd | 0xC3 | Response | Servo command response |
-| AckFirmwareUpdate | 0xC4 | Response | Firmware chunk ACK (success + offset) |
-| AckCommand | 0xC5 | Response | Command execution ACK |
+| Request | 0x80 | Downlink | Unified request (see RequestKind) |
+| Response | 0xC0 | Response | Unified response (see RequestKind) |
+
+### RequestKind
+
+All downlink operations are unified into a single `Request (0x80)` frame; the first byte of the payload (`RequestKind`) identifies the specific operation.
+
+| RequestKind | Value | Description | Expects Response |
+|-------------|-------|-------------|-----------------|
+| Reset | 0x01 | Reboot MCU | No (fire-and-forget) |
+| Shutdown | 0x02 | Shutdown (cut all power) | No (fire-and-forget) |
+| Ota | 0x03 | Trigger OTA update | No (fire-and-forget) |
+| ConfigWrite | 0x10 | Write single config item | Yes |
+| ConfigQuery | 0x11 | Query single config item | Yes |
+| ConfigQueryAll | 0x12 | Query all configs | Yes |
+| DeviceInfo | 0x13 | Query device identity & memory layout (static) | Yes |
+| ServoForward | 0x20 | Forward servo command | Yes |
+| FirmwareUpdate | 0x21 | Firmware update data chunk | Yes |
+
+### Request / Response Wire Format
+
+```
+Request:  FrameType(0x80) + payload[request_kind:1][data:N]
+Response: FrameType(0xC0) + payload[request_kind:1][success:1][data:N]
+```
+
+- `request_kind`: echoes the `RequestKind` byte
+- `success`: `0x01` = success, `0x00` = failure
+- `data`: response-specific payload (e.g. DeviceInfo, BoardConfigSnapshot, Config value)
 
 ## Data Types
 
@@ -92,7 +109,8 @@ All protocol data uses integer types with scaling factors for efficient transmis
 | `ImuData` | accel[3], gyro[3], quaternion[4], timestamp_ms, roll, pitch, yaw | 100Hz |
 | `PowerData` | servo_voltage_mv/current_ma, charge_in_voltage_mv/current_ma, bat_voltage_mv/current_ma | 20Hz |
 | `BatteryState` | voltage_mv, current_ma, percentage, capacity_mah, cell_voltages_mv, ... | 10Hz |
-| `SystemInfo` | device_id, uid, uptime, cpu_usage, heap, stack, frames_sent, pd_voltage/current, version, temperatures | 1Hz |
+| `DeviceInfo` | device_id, uid, imu_id, firmware_version, ram_kb, flash_boot_kb, flash_app_kb, flash_ota_kb, flash_user_kb | Query only |
+| `Diagnostic` | uptime, cpu_usage, heap, stack, error_counts, frames_sent, pd_voltage/current, temperatures | 1Hz |
 | `BoardEvent` | charge_phase, state_change_flags, protection_flags, error_flags | Triggered |
 | `LogMessage` | level, file_name, fun_name, msg | Triggered |
 | `BoardConfigSnapshot` | All config params + switch states | Event triggered |
@@ -142,15 +160,37 @@ Battery status information.
 | cell_voltages_mv | Vec\<u16\> | mV | Cell voltages |
 | cell_temperatures | Vec\<i16\> | ×10 | Cell temperatures |
 
-### SystemInfo
+### DeviceInfo
 
-System information including temperature data (merged from old ThermalData). Payload length: 41 bytes.
+Device identity and memory layout (static hardware information). Does not change at runtime. Obtained via `RequestKind::DeviceInfo`.
+
+```rust
+pub struct Version {
+    pub major: u8,
+    pub minor: u8,
+    pub patch: u8,
+}
+// Display format: "major.minor.patch", e.g. "0.1.0"
+```
 
 | Field | Type | Unit | Description |
 |-------|------|------|-------------|
-| device_id | u16 | - | STM32 device ID |
+| device_id | u16 | - | STM32 device ID (DBGMCU.IDCODE) |
 | uid | u32 | - | STM32 unique ID |
 | imu_id | u8 | - | IMU chip ID |
+| firmware_version | Version | - | Firmware version |
+| ram_kb | u16 | KB | RAM size |
+| flash_boot_kb | u16 | KB | Bootloader flash size |
+| flash_app_kb | u16 | KB | Application flash size |
+| flash_ota_kb | u16 | KB | OTA temp flash size |
+| flash_user_kb | u16 | KB | User data flash size |
+
+### Diagnostic
+
+Runtime diagnostics (runtime state data that changes continuously during operation). Pushed at 1 Hz via `FrameType::Diagnostic (0x06)`.
+
+| Field | Type | Unit | Description |
+|-------|------|------|-------------|
 | uptime_s | u32 | s | Uptime (seconds) |
 | cpu_usage_percent | u8 | % | CPU usage |
 | free_heap_kb | u16 | KB | Free heap memory |
@@ -162,23 +202,11 @@ System information including temperature data (merged from old ThermalData). Pay
 | frames_sent_total | u32 | - | Total frames sent |
 | pd_request_voltage_mv | u16 | mV | PD protocol voltage |
 | pd_request_current_ma | u16 | mA | PD protocol current |
-| firmware_version | Version | - | Firmware version |
 | temp_servo_power | i16 | ×10 | Servo power temperature |
 | temp_5v_power | i16 | ×10 | 5V power temperature |
 | temp_mcu | i16 | ×10 | MCU temperature |
 | temp_charge | i16 | ×10 | Charge circuit temperature |
 | temp_battery | i16 | ×10 | Battery temperature |
-
-#### Version Structure
-
-```rust
-pub struct Version {
-    pub major: u8,
-    pub minor: u8,
-    pub patch: u8,
-}
-// Display format: "major.minor.patch", e.g. "0.1.0"
-```
 
 ### BoardEvent
 
@@ -324,8 +352,6 @@ Log levels: `OFF=0`, `Debug=1`, `Info=2`, `Warn=3`, `Error=4`.
 | ChargeStopVoltageMv | 0x36 | Charge stop voltage (mV) |
 | ServoBaudRate | 0x37 | Servo communication baud rate (u32) |
 
-> **Note**: One-shot commands (Reset / Shutdown / OTA) moved to `CommandType` in `command.rs`, sent via the `Command (0x85)` frame — they are no longer config types.
-
 ### BoardConfigSnapshot
 
 Board configuration snapshot for querying and displaying the current configuration state. Payload length: 24 bytes (4 bool + 2 u8 + 7 u16 + 1 u32).
@@ -347,18 +373,6 @@ Board configuration snapshot for querying and displaying the current configurati
 | charge_stop_voltage_mv | u16 | mV | 168 | Charge stop voltage |
 | servo_baud_rate | u32 | baud | 115200 | Servo communication baud rate |
 
-### Command Types
-
-One-shot actions sent via the `Command (0x85)` frame:
-
-```rust
-pub enum CommandType {
-    Reset = 0x01,     // Reboot the MCU
-    Shutdown = 0x02,  // Shutdown (cut all power)
-    Ota = 0x03,       // Trigger OTA update
-}
-```
-
 ### ServoCmdWrapper
 
 Servo command wrapper for transparently forwarding raw bytes to the servo bus. It may contain multiple servo operation commands:
@@ -377,7 +391,7 @@ impl ServoCmdWrapper {
 
 ## Usage Examples
 
-### Parse Frame
+### Parse Uplink Frame
 
 ```rust
 use servo_robot_protocol::frame::{RawFrame, FrameType};
@@ -392,39 +406,75 @@ match frame.frame_type {
         let imu = ImuData::from_bytes(&frame.payload)?;
         println!("Roll: {:.1}°", imu.roll);
     }
-    FrameType::System => {
-        let sys = SystemInfo::from_bytes(&frame.payload)?;
-        println!("MCU Temp: {:.1}°C", sys.temp_mcu as f32 / 10.0);
+    FrameType::Diagnostic => {
+        let diag = Diagnostic::from_bytes(&frame.payload)?;
+        println!("MCU Temp: {:.1}°C", diag.temp_mcu as f32 / 10.0);
     }
     _ => {}
 }
 ```
 
-### Encode Frame
+### Send Request
 
 ```rust
 use servo_robot_protocol::frame::{RawFrame, FrameType};
-use servo_robot_protocol::config::Config;
+use servo_robot_protocol::request::{Request, RequestKind};
 
-let config = Config::PowerServoCurrentLimitMa(5000); // 5000mA = 5A
+// Query device info
+let req = Request::new(RequestKind::DeviceInfo, vec![]);
 let frame = RawFrame {
-    frame_type: FrameType::CfgWrite,
-    payload: config.to_bytes(),
+    frame_type: FrameType::Request,
+    payload: req.to_payload(),
 };
 let bytes = frame.encode(); // Includes HEAD + TYPE + LEN + PAYLOAD + CRC
+```
+
+### Handle Response
+
+```rust
+use servo_robot_protocol::response::Response;
+use servo_robot_protocol::request::RequestKind;
+use servo_robot_protocol::device_info::DeviceInfo;
+
+// Parse response
+let resp = Response::from_payload(&frame.payload)?;
+if resp.success {
+    match resp.request_kind {
+        RequestKind::DeviceInfo => {
+            let info = DeviceInfo::from_bytes(&resp.data)?;
+            println!("Firmware: {}", info.firmware_version);
+        }
+        RequestKind::ConfigQuery => { /* parse config value */ }
+        _ => {}
+    }
+}
+```
+
+### Fire-and-Forget Commands
+
+```rust
+use servo_robot_protocol::request::{Request, RequestKind};
+
+// Reset MCU — no response expected
+let req = Request::new(RequestKind::Reset, vec![]);
+// Shutdown — no response expected
+let req = Request::new(RequestKind::Shutdown, vec![]);
+// Trigger OTA — no response expected
+let req = Request::new(RequestKind::Ota, vec![]);
 ```
 
 ### Typed Frame
 
 ```rust
 use servo_robot_protocol::frame::{RawFrame, FrameType, TypedFrame};
-use servo_robot_protocol::config::Config;
 
 // RawFrame → TypedFrame, auto-dispatched parsing
 let typed = frame.parse_typed()?;
 match typed {
     TypedFrame::Imu(imu) => println!("IMU: {:?}", imu),
     TypedFrame::Battery(bat) => println!("Battery: {:.1}%", bat.percentage),
+    TypedFrame::Diagnostic(diag) => println!("CPU: {}%", diag.cpu_usage_percent),
+    TypedFrame::Response(resp) => println!("Response: kind={:?}, ok={}", resp.request_kind, resp.success),
     _ => {}
 }
 ```
@@ -433,15 +483,17 @@ match typed {
 
 ```rust
 use servo_robot_protocol::servo::ServoCmdWrapper;
+use servo_robot_protocol::request::{Request, RequestKind};
 use servo_robot_protocol::frame::{RawFrame, FrameType};
 
 // Create servo command from raw bytes
 let cmd = ServoCmdWrapper::new(vec![0x01, 0x02, 0x03]);
 
-// Encode as frame
+// Encode as Request frame
+let req = Request::new(RequestKind::ServoForward, cmd.to_payload());
 let frame = RawFrame {
-    frame_type: FrameType::ServoForward,
-    payload: cmd.to_payload(),
+    frame_type: FrameType::Request,
+    payload: req.to_payload(),
 };
 let bytes = frame.encode();
 ```
@@ -486,11 +538,13 @@ src/
 ├── imu.rs              # ImuData
 ├── power.rs            # PowerData
 ├── battery_state.rs    # BatteryState
-├── system.rs           # SystemInfo, Version (incl. temperature data)
+├── device_info.rs      # DeviceInfo, Version (static device identity)
+├── diagnostic.rs       # Diagnostic (runtime diagnostics: CPU, memory, errors, temperatures)
 ├── event.rs            # BoardEvent, EventLog, EventKind, EventCategory
 ├── log.rs              # LogMessage, LogLevel
 ├── config.rs           # ConfigType, Config, BoardConfigSnapshot
-├── command.rs          # CommandType, Command, AckCommand
+├── request.rs          # RequestKind, Request
+├── response.rs         # Response
 └── servo.rs            # ServoCmdWrapper
 ```
 

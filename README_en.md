@@ -4,30 +4,30 @@ English | [简体中文](README.md)
 
 **Rust host-side communication driver for ServoRobotBoard (Workspace)**
 
-Bidirectional serial communication between a host computer and ServoRobotBoard. This repository is a Cargo workspace containing two crates — the protocol layer and the driver layer — designed for integration with ROS2 nodes, TUIs, tests, and other host-side applications.
+Bidirectional serial communication between host PC and ServoRobotBoard. This repository is a Cargo workspace containing a protocol crate and a driver crate, integrable with ROS2 nodes, TUIs, tests, and other host-side scenarios.
 
 ## Workspace Structure
 
 | Crate | Description | Docs |
 |-------|-------------|------|
-| [servo-robot-protocol](crates/servo-robot-protocol/README.md) | Protocol layer: frame format, data types (IMU / Power / Battery / System / Event / Log / Config / Servo, etc.), CRC checksum. `no_std` + `alloc` compatible, works on both PC and embedded platforms | [简体中文](crates/servo-robot-protocol/README.md) |
-| [servo-robot-driver](crates/servo-robot-driver/README.md) | Driver layer: serial communication, `DriverCallback` callbacks, thread-safe state snapshots, auto-reconnect, mock transport, sync/async dual drivers (`Driver` / `AsyncDriver`) | [简体中文](crates/servo-robot-driver/README.md) · [English](crates/servo-robot-driver/README_en.md) |
+| [servo-robot-protocol](crates/servo-robot-protocol/README_en.md) | Protocol layer: frame format, data types (IMU / Power / Battery / Diagnostic / DeviceInfo / Event / Log / Config / Servo), CRC. `no_std` + `alloc` compatible for both PC and embedded platforms | [中文](crates/servo-robot-protocol/README.md) · [English](crates/servo-robot-protocol/README_en.md) |
+| [servo-robot-driver](crates/servo-robot-driver/README_en.md) | Driver layer: serial transport, `DriverCallback` callbacks, thread-safe state snapshots, auto-reconnect, mock transport, sync/async dual drivers (`Driver` / `AsyncDriver`) | [中文](crates/servo-robot-driver/README.md) · [English](crates/servo-robot-driver/README_en.md) |
 
 ```
 ┌──────────────────────────────────────────────┐
-│                  User Code                     │
-│        (ROS2 Node / TUI / Tests)               │
+│              Host Application                │
+│        (ROS2 Node / TUI / Test)              │
 └──────────────┬───────────────────────────────┘
                │
 ┌──────────────▼───────────────────────────────┐
 │            servo-robot-driver                 │
 │    Driver / AsyncDriver / EventBus / State    │
-│     Transport (Serial / Mock / Tokio / Custom)│
+│   Transport (Serial / Mock / Tokio / Custom)  │
 └──────────────┬───────────────────────────────┘
                │
 ┌──────────────▼───────────────────────────────┐
 │          servo-robot-protocol (no_std)        │
-│      Frame / CRC / data type definitions      │
+│      Frame / CRC / Data Type Definitions      │
 └──────────────┬───────────────────────────────┘
                │ Serial (HEAD + TYPE + LEN + PAYLOAD + CRC)
                ▼
@@ -36,15 +36,17 @@ Bidirectional serial communication between a host computer and ServoRobotBoard. 
 
 ## Features
 
-- **Frame protocol**: `HEAD + TYPE + LEN + PAYLOAD + CRC` framing, CRC-16/CCITT checksum
-- **Full data types**: IMU, Power, Battery, System (incl. temperature), Event, Log, Config, Servo, Command
-- **`no_std` compatible**: protocol layer runs on embedded platforms (`embedded` feature)
-- **Callback mechanism**: `DriverCallback` trait; board logs dispatched via `on_log`, default output through the `log` crate
-- **State snapshots**: thread-safe `DriverState::snapshot()` for polling high-frequency data from TUIs / ROS2
-- **Sync request-response**: `query_config_sync` / `write_config_sync` auto-wait for ACK
-- **Auto-reconnect**: configurable retries with exponential backoff
+- **Frame protocol**: `HEAD + TYPE + LEN + PAYLOAD + CRC` with CRC-16/CCITT checksum
+- **Request/Response model**: 9 frame types (7 uplink + Request + Response); all downlink operations use a unified Request frame, all acknowledgements use a unified Response frame
+- **Complete data types**: IMU, Power, Battery, Diagnostic (runtime), DeviceInfo (static identity), Event, Log, Config, Servo
+- **`no_std` compatible**: protocol layer works on embedded platforms (`embedded` feature)
+- **Callback mechanism**: `DriverCallback` trait; board logs dispatched via `on_log`, default output through `log` crate
+- **State snapshots**: thread-safe `DriverState::snapshot()` for TUI / ROS2 polling
+- **Sync request-response**: `query_config_sync` / `write_config_sync` auto-wait for acknowledgement
+- **Auto-reconnect**: configurable retry count with exponential backoff
 - **Mock transport**: `MockTransport` simulates real data for development and testing
 - **Sync/async dual drivers**: `Driver` / `AsyncDriver` (`async` feature)
+- **C/C++ FFI**: `sr_driver_*` functions, `sr_version` version query, C/C++ header compatible
 
 ## Frame Protocol
 
@@ -54,49 +56,63 @@ Bidirectional serial communication between a host computer and ServoRobotBoard. 
 │ 1B   │ 1B   │ 2B   │   0~255B      │ 2B   │
 └──────┴──────┴──────┴───────────────┴──────┘
 
-HEAD:    0xAA (fixed header)
-TYPE:    Message type
-LEN:     Payload length (little-endian uint16)
-PAYLOAD: Data content
-CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
+HEAD:    0xAA (fixed)
+TYPE:    message type
+LEN:     payload length (little-endian uint16)
+PAYLOAD: data content
+CRC:     CRC-16/CCITT (from TYPE to end of PAYLOAD)
 ```
 
 ## Frame Types
 
-> **Note**: `0x03` is reserved (old Thermal, merged into System).
+### Uplink Frames (firmware push)
 
-| Type | Value | Direction | Description |
-|------|-------|-----------|-------------|
-| Imu | 0x01 | Uplink | IMU inertial measurement data |
-| Power | 0x02 | Uplink | Power electrical data |
-| Config | 0x04 | Uplink | Config snapshot |
-| Battery | 0x05 | Uplink | Battery state |
-| System | 0x06 | Uplink | System info + temperature data |
-| Event | 0x07 | Uplink | Event |
-| Log | 0x08 | Uplink | Log message |
-| CfgWrite | 0x80 | Downlink | Write config |
-| CfgQuery | 0x81 | Downlink | Query single config |
-| CfgQueryAll | 0x82 | Downlink | Query all configs |
-| ServoForward | 0x83 | Downlink | Forward servo command |
-| FirmwareUpdate | 0x84 | Downlink | Firmware update |
-| Command | 0x85 | Downlink | Generic command (Reset / Shutdown / OTA) |
-| AckCfgWrite | 0xC0 | Response | Write ACK |
-| AckCfgQuery | 0xC1 | Response | Single config response |
-| AckCfgQueryAll | 0xC2 | Response | All configs response |
-| AckServoCmd | 0xC3 | Response | Servo command response |
-| AckFirmwareUpdate | 0xC4 | Response | Firmware update response |
-| AckCommand | 0xC5 | Response | Command response |
+| Type | Value | Description |
+|------|-------|-------------|
+| Imu | 0x01 | IMU inertial measurement data |
+| Power | 0x02 | Power electrical data |
+| Config | 0x04 | Configuration snapshot |
+| Battery | 0x05 | Battery state |
+| Diagnostic | 0x06 | Runtime diagnostics (CPU/memory/error counters/temperatures) |
+| Event | 0x07 | Board events |
+| Log | 0x08 | Log messages |
+
+### Downlink Frames (PC → firmware)
+
+| Type | Value | Description |
+|------|-------|-------------|
+| Request | 0x80 | Unified request frame; first payload byte is RequestKind |
+
+### Response Frames (firmware → PC)
+
+| Type | Value | Description |
+|------|-------|-------------|
+| Response | 0xC0 | Unified response; payload: `[request_kind:1][success:1][data:N]` |
+
+### RequestKind (first byte of Request payload)
+
+| Value | Name | Expects Response | Description |
+|-------|------|------------------|-------------|
+| 0x01 | Reset | No | Reboot MCU (fire-and-forget) |
+| 0x02 | Shutdown | No | Power off (fire-and-forget) |
+| 0x03 | Ota | No | Trigger OTA update (fire-and-forget) |
+| 0x10 | ConfigWrite | Yes | Write single config item |
+| 0x11 | ConfigQuery | Yes | Query single config item |
+| 0x12 | ConfigQueryAll | Yes | Query all configs |
+| 0x13 | DeviceInfo | Yes | Query device identity and memory layout |
+| 0x20 | ServoForward | Yes | Forward servo command |
+| 0x21 | FirmwareUpdate | Yes | Firmware update data block |
 
 ## Quick Start
 
-Add the driver crate to your `Cargo.toml`:
+Add the driver crate to `Cargo.toml`:
 
 ```toml
 [dependencies]
 servo-robot-driver = { path = "crates/servo-robot-driver" }
 ```
 
-### Using a Real Serial Port
+### Real Serial Port
 
 ```rust
 use servo_robot_driver::{Driver, SerialTransport};
@@ -106,7 +122,7 @@ let mut driver = Driver::new(transport);
 driver.start()?;
 ```
 
-### Using the Mock Transport (dev / testing, requires `mock` feature)
+### Mock Transport (development / testing, requires `mock` feature)
 
 ```rust
 use servo_robot_driver::{Driver, MockTransport, DriverCallback};
@@ -127,9 +143,42 @@ driver.register_callback(MyCallback);
 driver.start()?;
 ```
 
+### Sending Commands
+
+```rust
+use servo_robot_driver::protocol::request::RequestKind;
+
+// fire-and-forget (no response wait)
+driver.send_command(RequestKind::Reset)?;
+
+// wait for response
+let success = driver.send_command_sync(RequestKind::Reset)?;
+
+// query device info
+let response = driver.query_device_info()?;
+```
+
+### C/C++ FFI
+
+```c
+#include "servo_robot_driver.h"
+
+// Get version
+sr_version ver = sr_driver_version();
+printf("Driver v%u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
+// Open serial port
+char err[256];
+sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof(err));
+sr_driver_start(d);
+// ...
+sr_driver_stop(d);
+sr_driver_free(d);
+```
+
 ### Async Driver (requires `async` feature)
 
-`AsyncDriver` is a thin facade over the sync `Driver`: operations run via `spawn_blocking` on the tokio blocking pool, while I/O and callbacks stay on the driver's dedicated threads.
+`AsyncDriver` is a thin wrapper over the sync `Driver`: operations run via `spawn_blocking` in the tokio blocking pool; I/O and callbacks remain on the driver's dedicated thread.
 
 ```rust
 use servo_robot_driver::{AsyncDriver, SerialTransport};
@@ -143,14 +192,15 @@ driver.start().await?;
 
 | Crate | Feature | Description |
 |-------|---------|-------------|
-| servo-robot-driver | `mock` | Enable MockTransport |
-| servo-robot-driver | `async` | Enable AsyncDriver (thin facade over sync Driver) |
+| servo-robot-driver | `mock` | Enable MockTransport simulated transport |
+| servo-robot-driver | `async` | Enable AsyncDriver (thin sync Driver facade) |
+| servo-robot-driver | `ffi` | Enable C FFI wrapper |
 | servo-robot-protocol | `embedded` | Embedded mode (`no_std`) |
 
-## Detailed Docs
+## Detailed Documentation
 
-- [servo-robot-protocol docs](crates/servo-robot-protocol/README.md) — data type fields, bit flags, CRC, encode/decode examples
-- [servo-robot-driver docs](crates/servo-robot-driver/README.md) — architecture, data flow, threading model, reconnection, callback API, logging
+- [servo-robot-protocol docs](crates/servo-robot-protocol/README_en.md) — data type fields, bitflags, CRC, codec examples
+- [servo-robot-driver docs](crates/servo-robot-driver/README_en.md) — architecture, data flow, threading model, reconnect, callback API, logging
 
 ## License
 

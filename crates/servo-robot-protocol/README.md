@@ -8,7 +8,7 @@ ServoRobotBoard 与上位机之间的通信协议定义，支持 `no_std` + `all
 
 - `#![no_std]` 兼容，支持嵌入式环境
 - 帧协议解析（HEAD + TYPE + LEN + PAYLOAD + CRC）
-- 完整的数据类型定义（IMU、Power、Battery、System（含温度）、Event、Log、Config、Servo、Command）
+- 完整的数据类型定义（IMU、Power、Battery、Diagnostic（运行时诊断）、DeviceInfo（设备标识）、Event、Log、Config、Servo、Request/Response）
 - CRC-16/CCITT 校验
 - 通过 `embedded` feature 切换平台
 
@@ -47,29 +47,72 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 
 ## 帧类型
 
-> **注意**：`0x03` 为保留值（原 Thermal，已合并进 System）。
+> **注意**：`0x03` 为保留值（原 Thermal，已合并进 Diagnostic）。
 
-| 类型 | 值 | 方向 | 说明 |
-|------|-----|------|------|
-| Imu | 0x01 | 上行 | IMU 惯性测量数据 |
-| Power | 0x02 | 上行 | 电源电气数据 |
-| Config | 0x04 | 上行 | 配置快照 |
-| Battery | 0x05 | 上行 | 电池状态 |
-| System | 0x06 | 上行 | 系统信息 + 温度数据 |
-| Event | 0x07 | 上行 | 事件 |
-| Log | 0x08 | 上行 | 日志消息 |
-| CfgWrite | 0x80 | 下行 | 写入配置 |
-| CfgQuery | 0x81 | 下行 | 查询单个配置 |
-| CfgQueryAll | 0x82 | 下行 | 查询所有配置 |
-| ServoForward | 0x83 | 下行 | 转发舵机命令 |
-| FirmwareUpdate | 0x84 | 下行 | 固件升级数据块 |
-| Command | 0x85 | 下行 | 一次性命令（复位 / 关机 / OTA）|
-| AckCfgWrite | 0xC0 | 应答 | 写入确认 |
-| AckCfgQuery | 0xC1 | 应答 | 单个配置响应 |
-| AckCfgQueryAll | 0xC2 | 应答 | 所有配置响应 |
-| AckServoCmd | 0xC3 | 应答 | 舵机命令响应 |
-| AckFirmwareUpdate | 0xC4 | 应答 | 固件块确认（成功 + 偏移）|
-| AckCommand | 0xC5 | 应答 | 命令执行确认 |
+### 上行帧（STM32 → PC，固件主动推送）
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Imu | 0x01 | IMU 惯性测量数据 |
+| Power | 0x02 | 电源电气数据 |
+| Config | 0x04 | 配置快照 |
+| Battery | 0x05 | 电池状态 |
+| Diagnostic | 0x06 | 运行时诊断（CPU、内存、错误计数、温度等）|
+| Event | 0x07 | 事件 |
+| Log | 0x08 | 日志消息 |
+
+### 下行帧（PC → STM32）
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Request | 0x80 | 统一请求帧（由 RequestKind 区分具体操作）|
+
+### 应答帧（STM32 → PC）
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Response | 0xC0 | 统一应答帧（payload 首字节为 RequestKind）|
+
+### RequestKind 子类型
+
+所有下行操作统一使用 `Request (0x80)` 帧，通过 payload 首字节区分具体操作：
+
+| RequestKind | 值 | 是否需要应答 | 说明 |
+|-------------|-----|-------------|------|
+| Reset | 0x01 | ✗ | 重启 MCU（fire-and-forget）|
+| Shutdown | 0x02 | ✗ | 关机，切断全部电源（fire-and-forget）|
+| Ota | 0x03 | ✗ | 触发 OTA 更新（fire-and-forget）|
+| ConfigWrite | 0x10 | ✓ | 写入单个配置项 |
+| ConfigQuery | 0x11 | ✓ | 查询单个配置项 |
+| ConfigQueryAll | 0x12 | ✓ | 查询所有配置 |
+| DeviceInfo | 0x13 | ✓ | 查询设备标识与内存布局（静态信息）|
+| ServoForward | 0x20 | ✓ | 转发舵机命令 |
+| FirmwareUpdate | 0x21 | ✓ | 固件更新数据块 |
+
+> **注意**：Reset、Shutdown、Ota 为 fire-and-forget 操作，固件执行后立即重启或断电，PC 端不应阻塞等待应答。
+
+### Request 帧结构
+
+```
+Wire format: HEAD(0xAA) + TYPE(0x80) + LEN + [request_kind:1][data:N] + CRC
+```
+
+| 字段 | 类型 | 说明 |
+|-------|------|-------------|
+| request_kind | u8 | RequestKind 枚举值 |
+| data | [u8] | 操作附带数据（如配置值、舵机命令字节、固件块等）|
+
+### Response 帧结构
+
+```
+Wire format: HEAD(0xAA) + TYPE(0xC0) + LEN + [request_kind:1][success:1][data:N] + CRC
+```
+
+| 字段 | 类型 | 说明 |
+|-------|------|-------------|
+| request_kind | u8 | 对应的 RequestKind 值 |
+| success | u8 | 0=失败，非0=成功 |
+| data | [u8] | 应答附带数据（如 Config、BoardConfigSnapshot、DeviceInfo 等）|
 
 ## 数据类型
 
@@ -92,10 +135,18 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 | `ImuData` | accel[3], gyro[3], quaternion[4], timestamp_ms, roll, pitch, yaw | 100Hz |
 | `PowerData` | servo_voltage_mv/current_ma, charge_in_voltage_mv/current_ma, bat_voltage_mv/current_ma | 20Hz |
 | `BatteryState` | voltage_mv, current_ma, percentage, capacity_mah, cell_voltages_mv, ... | 10Hz |
-| `SystemInfo` | device_id, uid, uptime, cpu_usage, heap, stack, frames_sent, pd_voltage/current, version, temperatures | 1Hz |
+| `Diagnostic` | uptime_s, cpu_usage, free_heap_kb, stack_watermark, error counters, frames_sent, pd params, temperatures | 1Hz |
 | `BoardEvent` | charge_phase, state_change_flags, protection_flags, error_flags | 触发式 |
 | `LogMessage` | level, file_name, fun_name, msg | 触发式 |
 | `BoardConfigSnapshot` | 全部配置参数 + 开关状态 | 事件触发 |
+
+### 下行/应答数据
+
+| 类型 | 方向 | 说明 |
+|------|------|-------------|
+| `Request` | PC → STM32 | 统一请求帧（含 RequestKind + 附带数据）|
+| `Response` | STM32 → PC | 统一应答帧（含 RequestKind + success + 附带数据）|
+| `DeviceInfo` | 按需查询 | 设备标识与内存布局（通过 DeviceInfo 请求获取）|
 
 ### ImuData
 
@@ -142,15 +193,40 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 | cell_voltages_mv | Vec\<u16\> | mV | 各电芯电压 |
 | cell_temperatures | Vec\<i16\> | ×10 | 各电芯温度 |
 
-### SystemInfo
+### DeviceInfo
 
-系统信息（含温度数据，已合并原 ThermalData）。payload 长度 41 字节。
+设备标识与内存布局（静态信息）。payload 长度 20 字节。通过 `RequestKind::DeviceInfo` 按需查询，数据在运行期间不会变化。
 
 | 字段 | 类型 | 单位 | 说明 |
 |-------|------|------|-------------|
-| device_id | u16 | - | STM32 设备 ID |
+| device_id | u16 | - | STM32 设备 ID (DBGMCU.IDCODE) |
 | uid | u32 | - | STM32 唯一 ID |
 | imu_id | u8 | - | IMU 芯片 ID |
+| firmware_version | Version | - | 固件版本（含 major/minor/patch）|
+| ram_kb | u16 | KB | RAM 大小 |
+| flash_boot_kb | u16 | KB | Bootloader Flash 大小 |
+| flash_app_kb | u16 | KB | Application Flash 大小 |
+| flash_ota_kb | u16 | KB | OTA Temp Flash 大小 |
+| flash_user_kb | u16 | KB | User Data Flash 大小 |
+
+#### Version 结构
+
+```rust
+pub struct Version {
+    pub major: u8,
+    pub minor: u8,
+    pub patch: u8,
+}
+// 显示格式: "major.minor.patch"，例如 "0.1.0"
+// 定义于 device_info.rs
+```
+
+### Diagnostic
+
+运行时诊断数据（原 SystemInfo 拆分后保留运行时部分）。payload 长度 31 字节。由固件以 1Hz 主动推送（帧类型 0x06）。
+
+| 字段 | 类型 | 单位 | 说明 |
+|-------|------|------|-------------|
 | uptime_s | u32 | s | 运行时间（秒）|
 | cpu_usage_percent | u8 | % | CPU 使用率 |
 | free_heap_kb | u16 | KB | 空闲堆内存 |
@@ -162,23 +238,11 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 | frames_sent_total | u32 | - | 已发送帧总数 |
 | pd_request_voltage_mv | u16 | mV | PD 协议电压 |
 | pd_request_current_ma | u16 | mA | PD 协议电流 |
-| firmware_version | Version | - | 固件版本 |
 | temp_servo_power | i16 | ×10 | 舵机供电温度 |
 | temp_5v_power | i16 | ×10 | 5V 供电温度 |
 | temp_mcu | i16 | ×10 | MCU 温度 |
 | temp_charge | i16 | ×10 | 充电电路温度 |
 | temp_battery | i16 | ×10 | 电池温度 |
-
-#### Version 结构
-
-```rust
-pub struct Version {
-    pub major: u8,
-    pub minor: u8,
-    pub patch: u8,
-}
-// 显示格式: "major.minor.patch"，例如 "0.1.0"
-```
 
 ### BoardEvent
 
@@ -324,7 +388,7 @@ pub enum EventCategory {
 | ChargeStopVoltageMv | 0x36 | 充电停止电压 (mV) |
 | ServoBaudRate | 0x37 | 舵机通信波特率 (u32) |
 
-> **注意**：复位 / 关机 / OTA 等一次性命令已移至 `command.rs` 的 `CommandType`，通过 `Command (0x85)` 帧发送，不再属于配置类型。
+> **注意**：配置读写通过 `Request` 帧（`RequestKind::ConfigWrite` / `ConfigQuery` / `ConfigQueryAll`）进行，应答通过 `Response` 帧返回。
 
 ### BoardConfigSnapshot
 
@@ -346,18 +410,6 @@ pub enum EventCategory {
 | charge_temp_limit | u16 | ×10 | 700 | 充电停止温度 (70.0°C) |
 | charge_stop_voltage_mv | u16 | mV | 168 | 充电停止电压 |
 | servo_baud_rate | u32 | baud | 115200 | 舵机通信波特率 |
-
-### 命令类型（Command）
-
-通过 `Command (0x85)` 帧发送的一次性动作：
-
-```rust
-pub enum CommandType {
-    Reset = 0x01,     // 复位 MCU
-    Shutdown = 0x02,  // 关机（切断所有电源）
-    Ota = 0x03,       // 触发 OTA 升级
-}
-```
 
 ### ServoCmdWrapper
 
@@ -392,11 +444,35 @@ match frame.frame_type {
         let imu = ImuData::from_bytes(&frame.payload)?;
         println!("Roll: {:.1}°", imu.roll);
     }
-    FrameType::System => {
-        let sys = SystemInfo::from_bytes(&frame.payload)?;
-        println!("MCU Temp: {:.1}°C", sys.temp_mcu as f32 / 10.0);
+    FrameType::Diagnostic => {
+        let diag = Diagnostic::from_bytes(&frame.payload)?;
+        println!("MCU Temp: {:.1}°C", diag.temp_mcu as f32 / 10.0);
     }
     _ => {}
+}
+```
+
+### 发送请求并解析应答
+
+```rust
+use servo_robot_protocol::frame::{RawFrame, FrameType};
+use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::response::Response;
+
+// 查询设备信息
+let req = Request::new(RequestKind::DeviceInfo, vec![]);
+let frame = RawFrame {
+    frame_type: FrameType::Request,
+    payload: req.to_payload(),
+};
+let bytes = frame.encode();
+
+// 解析应答
+let (resp_frame, _) = RawFrame::decode(&response_bytes)?;
+let resp = Response::from_payload(&resp_frame.payload)?;
+if resp.success {
+    let info = DeviceInfo::from_bytes(&resp.data)?;
+    println!("Firmware: {}", info.firmware_version);
 }
 ```
 
@@ -408,8 +484,8 @@ use servo_robot_protocol::config::Config;
 
 let config = Config::PowerServoCurrentLimitMa(5000); // 5000mA = 5A
 let frame = RawFrame {
-    frame_type: FrameType::CfgWrite,
-    payload: config.to_bytes(),
+    frame_type: FrameType::Request,
+    payload: Request::new(RequestKind::ConfigWrite, config.to_bytes()).to_payload(),
 };
 let bytes = frame.encode(); // 包含 HEAD + TYPE + LEN + PAYLOAD + CRC
 ```
@@ -425,6 +501,7 @@ let typed = frame.parse_typed()?;
 match typed {
     TypedFrame::Imu(imu) => println!("IMU: {:?}", imu),
     TypedFrame::Battery(bat) => println!("Battery: {:.1}%", bat.percentage),
+    TypedFrame::Diagnostic(diag) => println!("CPU: {}%", diag.cpu_usage_percent),
     _ => {}
 }
 ```
@@ -434,14 +511,15 @@ match typed {
 ```rust
 use servo_robot_protocol::servo::ServoCmdWrapper;
 use servo_robot_protocol::frame::{RawFrame, FrameType};
+use servo_robot_protocol::request::{Request, RequestKind};
 
 // 从原始字节创建舵机命令
 let cmd = ServoCmdWrapper::new(vec![0x01, 0x02, 0x03]);
 
-// 编码为帧
+// 编码为请求帧
 let frame = RawFrame {
-    frame_type: FrameType::ServoForward,
-    payload: cmd.to_payload(),
+    frame_type: FrameType::Request,
+    payload: Request::new(RequestKind::ServoForward, cmd.to_payload()).to_payload(),
 };
 let bytes = frame.encode();
 ```
@@ -486,11 +564,13 @@ src/
 ├── imu.rs              # ImuData
 ├── power.rs            # PowerData
 ├── battery_state.rs    # BatteryState
-├── system.rs           # SystemInfo, Version（含温度数据）
+├── device_info.rs      # DeviceInfo, Version（静态设备标识）
+├── diagnostic.rs       # Diagnostic（运行时诊断）
 ├── event.rs            # BoardEvent, EventLog, EventKind, EventCategory
 ├── log.rs              # LogMessage, LogLevel
 ├── config.rs           # ConfigType, Config, BoardConfigSnapshot
-├── command.rs          # CommandType, Command, AckCommand
+├── request.rs          # RequestKind, Request（统一下行帧）
+├── response.rs         # Response（统一应答帧）
 └── servo.rs            # ServoCmdWrapper
 ```
 

@@ -8,7 +8,7 @@ The communication driver between the host computer and ServoRobotBoard is used f
 
 - Frame protocol parsing (HEAD + TYPE + LEN + PAYLOAD + CRC)
 - `DriverCallback` trait callback mechanism
-- Synchronous request-response API (auto-wait for ACK)
+- Synchronous request-response API (auto-wait for response)
 - Thread-safe state snapshot API
 - Auto-reconnection (configurable retries and backoff)
 - Mock transport layer (for development and testing)
@@ -23,32 +23,35 @@ The communication driver between the host computer and ServoRobotBoard is used f
 ┌─────────────────────────────────────────────────────────────────┐
 │                         User Code                                │
 │  (ROS2 Node / TUI / Tests)                                       │
-├───────────────────────────────────────────────────────────────── ┤
-│                   Driver / AsyncDriver                           │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐    │
-│  │   EventBus   │  │ DriverState  │  │ Sync Wait (wait_for_*)│   │
-│  │ (Dispatch)   │  │ (Snapshot)   │  │ (recv_timeout)       │    │
-│  └──────┬───────┘  └──────────────┘  └──────────────────────┘    │
+├─────────────────────────────────────────────────────────────────┤
+│                   Driver / AsyncDriver                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
+│  │   EventBus   │  │ DriverState  │  │ Sync Wait (wait_for_*)│  │
+│  │ (Dispatch)   │  │ (Snapshot)   │  │ (recv_timeout)       │   │
+│  └──────┬───────┘  └──────────────┘  └──────────────────────┘   │
 │         │                                                        │
 │  ┌──────┴───────┐                                                │
-│  │ driver_common│ (Frame encode / decode)                        │
+│  │ driver_common │ (Frame encode / decode)                       │
 │  └──────┬───────┘                                                │
 ├─────────┼────────────────────────────────────────────────────────┤
 │         ▼                                                        │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │                     Transport (trait)                    │    │
-│  │  ┌──────────┐  ┌──────────┐  ┌────────────────────────┐  │    │
-│  │  │ Serial   │  │  Mock    │  │  Custom (extension)     │  │    │
-│  │  └──────────┘  └──────────┘  └────────────────────────┘  │    │
-│  └──────────────────────────────────────────────────────────┘    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                     Transport (trait)                     │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌────────────────────────┐  │   │
+│  │  │ Serial   │  │  Mock    │  │  Custom (extension)    │  │   │
+│  │  └──────────┘  └──────────┘  └────────────────────────┘  │   │
+│  └──────────────────────────────────────────────────────────┘   │
 ├──────────────────────────────────────────────────────────────────┤
-│                       Protocol Layer                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│  │  Frame   │  │  IMU     │  │  Power   │  │ Battery  │          │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│  │ Config   │  │  System  │  │  Event   │  │   Log    │          │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘          │                                                  
+│                       Protocol Layer                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │  Frame   │  │  IMU     │  │  Power   │  │ Battery  │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
+│  │ Config   │  │Diagnostic│  │DeviceInfo│  │  Event   │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                      │
+│  │   Log    │  │ Request  │  │ Response │                      │
+│  └──────────┘  └──────────┘  └──────────┘                      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -59,10 +62,10 @@ STM32 ──serial──→ Transport.read_frame() ──→ decode_and_dispatch
                                                   │
                                   ┌───────────────┼───────────────┐
                                   ▼               ▼               ▼
-                          state.update_*()   return Event    ACK Event
+                          state.update_*()   return Event    Response Event
                                   │               │               │
                                   ▼               ▼               ▼
-                          DriverState       bounded channel   ACK Channel
+                          DriverState       bounded channel   Response Channel
                           (Latest Snapshot)  (1024)           (Sync Wait)
                                   │               │
                                   ▼               ▼
@@ -110,12 +113,12 @@ pub struct Driver {
 ```rust
 pub struct EventBus {
     tx: Sender<DriverEvent>,       // bounded(1024), main event channel
-    ack_tx: Sender<DriverEvent>,   // unbounded, ACK-only channel
+    ack_tx: Sender<DriverEvent>,   // bounded(64), response channel (sync wait)
     callbacks: Arc<Mutex<Vec<Box<dyn DriverCallback>>>>,
 }
 ```
 
-- Dual-channel design: main event channel (bounded, auto backpressure) + ACK channel (unbounded)
+- Dual-channel design: main event channel (bounded, auto backpressure) + response channel (bounded, for sync request-response)
 - Callbacks fire on dedicated dispatch thread, non-blocking to read thread
 
 #### 4. Protocol Layer
@@ -142,22 +145,35 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 
 ### Frame Types
 
+> **Note**: `0x03` is reserved (old Thermal, merged into Diagnostic).
+
 | Type | Value | Direction | Description |
 |------|-------|-----------|-------------|
-| Imu | 0x01 | Upstream | IMU data |
-| Power | 0x02 | Upstream | Power data |
-| Thermal | 0x03 | Upstream | Temperature data |
-| Config | 0x04 | Upstream | Config snapshot |
-| Battery | 0x05 | Upstream | Battery state |
-| System | 0x06 | Upstream | System info |
-| Event | 0x07 | Upstream | Event |
-| Log | 0x08 | Upstream | Log message |
-| CfgWrite | 0x80 | Downstream | Write config |
-| CfgQuery | 0x81 | Downstream | Query config |
-| CfgQueryAll | 0x82 | Downstream | Query all configs |
-| AckCfgWrite | 0xC0 | Response | Write ACK |
-| AckCfgQuery | 0xC1 | Response | Config response |
-| AckCfgQueryAll | 0xC2 | Response | All configs |
+| Imu | 0x01 | Uplink | IMU inertial measurement data |
+| Power | 0x02 | Uplink | Power electrical data |
+| Config | 0x04 | Uplink | Config snapshot |
+| Battery | 0x05 | Uplink | Battery state |
+| Diagnostic | 0x06 | Uplink | Runtime diagnostic (CPU, memory, temps, errors) |
+| Event | 0x07 | Uplink | Event |
+| Log | 0x08 | Uplink | Log message |
+| Request | 0x80 | Downlink | Unified request (RequestKind byte selects operation) |
+| Response | 0xC0 | Response | Unified response ([request_kind:1][success:1][data:N]) |
+
+### Request Types (RequestKind)
+
+All downlink operations use a single `Request` frame (0x80). The first payload byte (`RequestKind`) selects the operation:
+
+| RequestKind | Value | Description | Expects Response |
+|-------------|-------|-------------|------------------|
+| Reset | 0x01 | Reboot MCU | No (fire-and-forget) |
+| Shutdown | 0x02 | Power off | No (fire-and-forget) |
+| Ota | 0x03 | Trigger OTA update | No (fire-and-forget) |
+| ConfigWrite | 0x10 | Write single config item | Yes |
+| ConfigQuery | 0x11 | Query single config item | Yes |
+| ConfigQueryAll | 0x12 | Query all configs | Yes |
+| DeviceInfo | 0x13 | Query static device info | Yes |
+| ServoForward | 0x20 | Forward servo command | Yes |
+| FirmwareUpdate | 0x21 | Firmware data chunk for OTA | Yes |
 
 ### Threading Model
 
@@ -190,8 +206,9 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 │  └──────────────┘                                │
 │                                                  │
 │  ┌──────────────┐                                │
-│  │  ACK Channel │  Sync wait recv_timeout()      │
-│  │ (unbounded)  │                                │
+│  │  Response    │  Sync wait recv_timeout()      │
+│  │  Channel     │                                │
+│  │ (bounded 64) │                                │
 │  └──────────────┘                                │
 └─────────────────────────────────────────────────┘
 ```
@@ -238,6 +255,9 @@ servo-robot-driver = { path = "../servo-robot-driver", features = ["async"] }
 use servo_robot_driver::{Driver, MockTransport, DriverCallback};
 use servo_robot_driver::protocol::imu::ImuData;
 use servo_robot_driver::protocol::battery_state::BatteryState;
+use servo_robot_driver::protocol::diagnostic::Diagnostic;
+use servo_robot_driver::protocol::device_info::DeviceInfo;
+use servo_robot_driver::protocol::response::Response;
 use servo_robot_driver::protocol::log::LogMessage;
 
 struct MyCallback;
@@ -250,6 +270,19 @@ impl DriverCallback for MyCallback {
 
     fn on_battery_state(&mut self, state: &BatteryState) {
         println!("Battery: {:.1}%", state.percentage);
+    }
+
+    fn on_diagnostic(&mut self, diag: &Diagnostic) {
+        println!("CPU: {}%, heap: {}KB, temp_mcu: {:.1}°C",
+            diag.cpu_usage_percent, diag.free_heap_kb, diag.temp_mcu as f32 / 10.0);
+    }
+
+    fn on_device_info(&mut self, info: &DeviceInfo) {
+        println!("Device: id={:#06x}, fw={}", info.device_id, info.firmware_version);
+    }
+
+    fn on_response(&mut self, resp: &Response) {
+        println!("Response: kind={:?}, success={}", resp.request_kind, resp.success);
     }
 
     // Override default log handling
@@ -277,6 +310,9 @@ let state = driver.state();
 let snap = state.snapshot();
 if let Some(imu) = &snap.imu {
     println!("Roll: {:.1}°", imu.roll);
+}
+if let Some(diag) = &snap.diagnostic {
+    println!("CPU: {}%, temps: mcu={:.1}°C", diag.cpu_usage_percent, diag.temp_mcu as f32 / 10.0);
 }
 ```
 
@@ -339,9 +375,8 @@ let written = mock.written_frames();
 |-----------|------|------------|
 | IMU | 100Hz | Attitude drift, sensor noise, gravity |
 | Power | 20Hz | Battery voltage variation, current fluctuation |
-| Thermal | 5Hz | Temperature rise trend, random noise |
+| Diagnostic | 1Hz | Uptime, CPU usage, temperatures, error counts |
 | Battery | 10Hz | SOC drain, charge state |
-| System | 1Hz | Uptime, CPU usage |
 | Event | 1Hz | Charge state, fan state, protection flags |
 
 ## Callback Mechanism
@@ -352,7 +387,7 @@ let written = mock.written_frames();
 use servo_robot_driver::{Driver, DriverCallback};
 use servo_robot_driver::protocol::imu::ImuData;
 use servo_robot_driver::protocol::battery_state::BatteryState;
-use servo_robot_driver::protocol::config::{BoardConfigSnapshot, Config};
+use servo_robot_driver::protocol::response::Response;
 use servo_robot_driver::protocol::log::LogMessage;
 
 struct MyCallback {
@@ -369,12 +404,10 @@ impl DriverCallback for MyCallback {
         println!("Battery: {:.1}%", state.percentage);
     }
 
-    fn on_ack_cfg_write(&mut self, success: bool) {
-        println!("Config write ack: {}", success);
-    }
-
-    fn on_ack_cfg_query(&mut self, config: &Config) {
-        println!("Config: {}", config);
+    // Unified response callback (replaces old on_ack_cfg_write / on_ack_cfg_query / etc.)
+    fn on_response(&mut self, resp: &Response) {
+        println!("Response: kind={:?}, success={}, data_len={}",
+            resp.request_kind, resp.success, resp.data.len());
     }
 
     // Board log callback (default: output via log crate)
@@ -394,15 +427,13 @@ driver.register_callback(MyCallback { imu_count: 0 });
 |--------|---------|-----------------|
 | `on_imu_data` | IMU frame (100Hz) | Empty |
 | `on_power_data` | Power frame (20Hz) | Empty |
-| `on_thermal_data` | Thermal frame (5Hz) | Empty |
 | `on_battery_state` | Battery frame (10Hz) | Empty |
-| `on_system_info` | System frame (1Hz) | Empty |
 | `on_config_snapshot` | Config snapshot | Empty |
 | `on_board_event` | Event frame (1Hz) | Empty |
+| `on_device_info` | DeviceInfo response | Empty |
+| `on_diagnostic` | Diagnostic frame (1Hz) | Empty |
 | `on_log(ts, log_msg)` | Board log frame | Output via `log` crate with `[ServoRobotBoard]` prefix |
-| `on_ack_cfg_write` | Config write ACK | Empty |
-| `on_ack_cfg_query` | Single config query response | Empty |
-| `on_ack_cfg_query_all` | All configs query response | Empty |
+| `on_response` | Unified response (all Request types) | Empty |
 | `on_error` | Driver error | Empty |
 
 ## Log System
@@ -446,11 +477,11 @@ env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debu
 ```rust
 use servo_robot_driver::protocol::config::{Config, ConfigType};
 
-// Async (no wait for ACK)
+// Async (no wait for response)
 driver.query_config(ConfigType::PowerServoCurrentLimit)?;
 driver.write_config(Config::PowerServoCurrentLimit(5.0))?;
 
-// Sync (wait for ACK)
+// Sync (wait for response)
 let config = driver.query_config_sync(ConfigType::PowerServoCurrentLimit)?;
 let all_config = driver.query_all_configs_sync()?;
 let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
@@ -465,13 +496,22 @@ Enable the `ffi` feature to compile the driver into a shared library (`.so`) cal
 ```bash
 # From the repo root; --features ffi is required, otherwise the .so exports no sr_* symbols
 cargo build --release --features ffi
-# Output: target/release/libservo_robot_driver.so (17 sr_driver_* exported symbols)
+# Output: target/release/libservo_robot_driver.so
 nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
 ```
 
 Header: `include/servo_robot_driver.h` (single interface contract: structs, enums, function declarations, threading red lines).
 
-### One-shot packaging (recommended)
+### Driver Version
+
+```c
+#include "servo_robot_driver.h"
+
+sr_version ver = sr_driver_version();
+printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+```
+
+### One-shot Packaging (Recommended)
 
 ```bash
 crates/servo-robot-driver/ffi/package_ffi.sh [output_dir]
@@ -492,7 +532,7 @@ cmake -S . -B build && cmake --build build
 ./build/cpp_example /dev/ttyUSB0 115200
 ```
 
-### Manual integration
+### Manual Integration
 
 ```c
 #include "servo_robot_driver.h"   // extern "C" guarded, safe to include from C++
@@ -515,7 +555,74 @@ gcc my_prog.c -I <include dir> -L target/release -lservo_robot_driver \
 
 Runtime options (pick one): `-Wl,-rpath` at link time / `LD_LIBRARY_PATH` / install to `/usr/local/lib` + `ldconfig`.
 
-### Red lines
+### FFI Callback Example (C)
+
+```c
+#include "servo_robot_driver.h"
+
+typedef struct {
+    uint64_t response_count;
+} my_ctx;
+
+static void on_response(void* userdata, const sr_response* resp) {
+    my_ctx* ctx = (my_ctx*)userdata;
+    ctx->response_count++;
+    printf("[RESP] kind=%u success=%u data_len=%zu\n",
+           resp->request_kind, resp->success, resp->data_len);
+}
+
+int main(void) {
+    char err[256];
+    sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
+
+    my_ctx ctx = {0};
+    sr_callbacks cbs;
+    memset(&cbs, 0, sizeof cbs);
+    cbs.userdata = &ctx;
+    cbs.on_response = on_response;
+    sr_driver_set_callbacks(d, &cbs);
+    sr_driver_start(d);
+
+    // ...
+
+    sr_driver_stop(d);
+    sr_driver_free(d);
+}
+```
+
+### FFI Callback Example (C++, Class-based)
+
+```cpp
+#include "servo_robot_driver.h"
+#include <functional>
+#include <cstdio>
+
+struct CallbackCtx {
+    std::function<void(const sr_response*)> on_response;
+    std::function<void(const sr_imu*)> on_imu;
+};
+
+extern "C" {
+void response_thunk(void* u, const sr_response* r) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_response) c->on_response(r);
+}
+void imu_thunk(void* u, const sr_imu* d) {
+    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_imu) c->on_imu(d);
+}
+} // extern "C"
+
+// Usage in a class (ROS2 node style):
+//   CallbackCtx ctx_;
+//   ctx_.on_response = [this](const sr_response* r) { handle_response(r); };
+//   ctx_.on_imu      = [this](const sr_imu* d)      { publish_imu(d); };
+//   sr_callbacks cbs = {};
+//   cbs.userdata = &ctx_;
+//   cbs.on_response = response_thunk;
+//   cbs.on_imu_data = imu_thunk;
+//   sr_driver_set_callbacks(driver_, &cbs);
+```
+
+### Red Lines
 
 - Callbacks run on the driver's **dispatch thread**; never call any `sr_driver_*` from inside a callback (especially `sr_driver_free` — self-deadlock)
 - Callback argument pointers are valid only during the callback
@@ -531,4 +638,3 @@ Full examples: `ffi/c_example.c` (C, free-function callbacks) and `ffi/cpp_examp
 | `mock` | `rand` | Enable MockTransport |
 | `async` | `tokio` | Enable AsyncDriver (thin facade over sync Driver) |
 | `ffi` | — | Enable C FFI layer (.so exports) |
-

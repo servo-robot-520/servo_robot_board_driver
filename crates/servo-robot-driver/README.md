@@ -14,6 +14,7 @@
 - 模拟传输层（用于开发和测试）
 - 同步/异步双驱动（`Driver` / `AsyncDriver`）
 - 板级日志通过 `DriverCallback::on_log` 分发，默认通过 `log` 库输出
+- C/C++ FFI（`sr_driver_*` API + `SrCallbacks` 回调表）
 
 ## 架构设计
 
@@ -22,7 +23,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         用户代码                                  │
-│  (ROS2 Node / TUI / 测试)                                        │
+│  (ROS2 Node / TUI / 测试 / C/C++ 通过 FFI)                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                   Driver / AsyncDriver                            │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
@@ -50,9 +51,13 @@
 │  │ (帧解析) │  │ (惯性)   │  │ (电源)   │  │ (电池)   │        │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
-│  │ Config  │  │  System  │  │  Event   │  │   Log    │        │
-│  │ (配置)   │  │ (系统)   │  │ (事件)   │  │ (日志)   │        │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │                                                  │
+│  │ Config   │  │Diagnostic│  │DeviceInfo│  │  Event   │        │
+│  │ (配置)   │  │ (诊断)   │  │ (设备)   │  │ (事件)   │        │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐                       │
+│  │   Log    │  │ Request  │  │ Response │                       │
+│  │ (日志)   │  │ (请求)   │  │ (应答)   │                       │
+│  └──────────┘  └──────────┘  └──────────┘                       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -63,10 +68,10 @@ STM32 ──串口──→ Transport.read_frame() ──→ decode_and_dispatch
                                               │
                               ┌───────────────┼───────────────┐
                               ▼               ▼               ▼
-                      state.update_*()   return Event    ACK 事件
+                      state.update_*()   return Event    Response 事件
                               │               │               │
                               ▼               ▼               ▼
-                      DriverState       bounded channel   ACK 通道
+                      DriverState       bounded channel   Response 通道
                       (最新值快照)       (1024)           (同步等待)
                               │               │
                               ▼               ▼
@@ -113,13 +118,13 @@ pub struct Driver {
 
 ```rust
 pub struct EventBus {
-    tx: Sender<DriverEvent>,       // bounded(1024)，主事件通道
-    ack_tx: Sender<DriverEvent>,   // unbounded，ACK 专用通道
+    tx: Sender<DriverEvent>,           // bounded(1024)，主事件通道
+    response_tx: Sender<DriverEvent>,  // bounded(64)，Response 专用通道
     callbacks: Arc<Mutex<Vec<Box<dyn DriverCallback>>>>,
 }
 ```
 
-- 双通道设计：主事件通道（bounded，自动背压）+ ACK 专用通道（unbounded）
+- 双通道设计：主事件通道（bounded，自动背压）+ Response 专用通道（bounded，无等待者时丢弃）
 - 回调在独立分发线程上触发，不阻塞读取线程
 
 #### 4. Protocol 层
@@ -146,29 +151,50 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 
 ### 帧类型
 
-| 类型 | 值 | 方向 | 说明 |
-|------|-----|------|------|
-| Imu | 0x01 | 上行 | IMU 数据 |
-| Power | 0x02 | 上行 | 电源数据 |
-| Thermal | 0x03 | 上行 | 温度数据 |
-| Config | 0x04 | 上行 | 配置快照 |
-| Battery | 0x05 | 上行 | 电池状态 |
-| System | 0x06 | 上行 | 系统信息 |
-| Event | 0x07 | 上行 | 事件 |
-| Log | 0x08 | 上行 | 日志消息 |
-| CfgWrite | 0x80 | 下行 | 写入配置 |
-| CfgQuery | 0x81 | 下行 | 查询配置 |
-| CfgQueryAll | 0x82 | 下行 | 查询所有配置 |
-| AckCfgWrite | 0xC0 | 应答 | 写入确认 |
-| AckCfgQuery | 0xC1 | 应答 | 配置响应 |
-| AckCfgQueryAll | 0xC2 | 应答 | 所有配置 |
+上行数据（STM32 → PC）：
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Imu | 0x01 | IMU 惯性测量数据 |
+| Power | 0x02 | 电源电气数据 |
+| Config | 0x04 | 配置快照 |
+| Battery | 0x05 | 电池状态 |
+| Diagnostic | 0x06 | 运行时诊断（CPU/内存/温度等）|
+| Event | 0x07 | 板级事件 |
+| Log | 0x08 | 日志消息 |
+
+下行请求（PC → STM32）：
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Request | 0x80 | 统一请求帧（`RequestKind` 首字节区分）|
+
+应答（STM32 → PC）：
+
+| 类型 | 值 | 说明 |
+|------|-----|------|
+| Response | 0xC0 | 统一应答帧（`request_kind` + `success` + `data`）|
+
+#### RequestKind
+
+| 变体 | 值 | 说明 | 需要应答 |
+|------|-----|------|---------|
+| Reset | 0x01 | 重启 MCU | 否 |
+| Shutdown | 0x02 | 关机 | 否 |
+| Ota | 0x03 | 触发 OTA 更新 | 否 |
+| ConfigWrite | 0x10 | 写入单个配置 | 是 |
+| ConfigQuery | 0x11 | 查询单个配置 | 是 |
+| ConfigQueryAll | 0x12 | 查询所有配置 | 是 |
+| DeviceInfo | 0x13 | 查询设备标识与内存布局 | 是 |
+| ServoForward | 0x20 | 转发舵机命令 | 是 |
+| FirmwareUpdate | 0x21 | 固件更新数据块 | 是 |
 
 ### 线程模型
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                   用户线程                        │
-│  driver.write_config() / driver.query_config()   │
+│  driver.send_request() / driver.query_config()   │
 │         │                                        │
 │         ▼                                        │
 │  ┌──────────────┐                                │
@@ -194,8 +220,8 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 │  └──────────────┘                                │
 │                                                  │
 │  ┌──────────────┐                                │
-│  │  ACK 通道     │  同步等待 recv_timeout()        │
-│  │ (unbounded)  │                                │
+│  │ Response 通道 │  同步等待 recv_timeout()        │
+│  │ (bounded 64) │                                │
 │  └──────────────┘                                │
 └─────────────────────────────────────────────────┘
 ```
@@ -234,6 +260,9 @@ servo-robot-driver = { path = "../servo-robot-driver", features = ["mock"] }
 
 # 启用异步支持
 servo-robot-driver = { path = "../servo-robot-driver", features = ["async"] }
+
+# 启用 C/C++ FFI
+servo-robot-driver = { path = "../servo-robot-driver", features = ["ffi"] }
 ```
 
 ### 使用 DriverCallback（推荐）
@@ -242,6 +271,9 @@ servo-robot-driver = { path = "../servo-robot-driver", features = ["async"] }
 use servo_robot_driver::{Driver, MockTransport, DriverCallback};
 use servo_robot_driver::protocol::imu::ImuData;
 use servo_robot_driver::protocol::battery_state::BatteryState;
+use servo_robot_driver::protocol::device_info::DeviceInfo;
+use servo_robot_driver::protocol::diagnostic::Diagnostic;
+use servo_robot_driver::protocol::response::Response;
 use servo_robot_driver::protocol::log::LogMessage;
 
 struct MyCallback;
@@ -254,6 +286,20 @@ impl DriverCallback for MyCallback {
 
     fn on_battery_state(&mut self, state: &BatteryState) {
         println!("Battery: {:.1}%", state.percentage);
+    }
+
+    fn on_device_info(&mut self, info: &DeviceInfo) {
+        println!("Device: id={:#06x} firmware={}", info.device_id, info.firmware_version);
+    }
+
+    fn on_diagnostic(&mut self, diag: &Diagnostic) {
+        println!("CPU: {}%  uptime: {}s  MCU temp: {:.1}°C",
+            diag.cpu_usage_percent, diag.uptime_s, diag.temp_mcu as f32 / 10.0);
+    }
+
+    fn on_response(&mut self, resp: &Response) {
+        println!("Response: {:?} success={} data={:?}",
+            resp.request_kind, resp.success, resp.data);
     }
 
     // 覆盖默认日志处理
@@ -282,6 +328,9 @@ let snap = state.snapshot();
 if let Some(imu) = &snap.imu {
     println!("Roll: {:.1}°", imu.roll);
 }
+if let Some(diag) = &snap.diagnostic {
+    println!("CPU: {}%  uptime: {}s", diag.cpu_usage_percent, diag.uptime_s);
+}
 ```
 
 ### 使用真实串口
@@ -298,242 +347,111 @@ driver.start()?;
 
 ```rust
 use servo_robot_driver::{Driver, SerialTransport, FnTransportFactory};
-use servo_robot_driver::reconnect::ReconnectConfig;
-use std::time::Duration;
-
-let factory = FnTransportFactory::new(|| {
-    SerialTransport::open("/dev/ttyUSB0", 115200).map(|t| Box::new(t) as _)
-});
-
-let config = ReconnectConfig::new(5)
-    .with_retry_interval(Duration::from_secs(1))
-    .with_backoff_multiplier(2.0)
-    .with_max_retry_interval(Duration::from_secs(30));
-
-let mut driver = Driver::new_with_reconnect(factory, config);
+// ...
+let factory = FnTransportFactory::new(|| SerialTransport::open("/dev/ttyUSB0", 115200));
+let mut driver = Driver::with_reconnect(factory, ReconnectConfig::default());
 driver.start()?;
 ```
 
-## MockTransport API
+### C/C++ FFI 快速开始
 
-```rust
-use servo_robot_driver::MockTransport;
-
-let mut mock = MockTransport::new();
-
-// 设置初始状态
-mock.set_battery_soc(80.0);
-mock.set_initial_attitude(10.0, 5.0, 0.0);
-mock.set_charging(true);
-
-// 模拟断开连接（用于测试重连）
-mock.set_auto_disconnect(1000);
-
-// 手动控制连接
-mock.disconnect();
-mock.reconnect();
-
-// 获取写入的帧（用于验证命令）
-let written = mock.written_frames();
-```
-
-### 模拟数据特性
-
-| 数据类型 | 更新频率 | 模拟特性 |
-|---------|---------|---------|
-| IMU | 100Hz | 姿态漂移、传感器噪声、重力分量 |
-| Power | 20Hz | 电池电压变化、电流波动 |
-| Thermal | 5Hz | 温度上升趋势、随机波动 |
-| Battery | 10Hz | 电量消耗、充电状态 |
-| System | 1Hz | 运行时间、CPU 使用率 |
-| Event | 1Hz | 充电状态、风扇状态、保护标志 |
-
-## 回调机制
-
-### DriverCallback trait
-
-```rust
-use servo_robot_driver::{Driver, DriverCallback};
-use servo_robot_driver::protocol::imu::ImuData;
-use servo_robot_driver::protocol::battery_state::BatteryState;
-use servo_robot_driver::protocol::config::{BoardConfigSnapshot, Config};
-use servo_robot_driver::protocol::log::LogMessage;
-
-struct MyCallback {
-    imu_count: u64,
-}
-
-impl DriverCallback for MyCallback {
-    fn on_imu_data(&mut self, data: &ImuData) {
-        self.imu_count += 1;
-        println!("IMU #{}: roll={:.1}", self.imu_count, data.roll);
-    }
-
-    fn on_battery_state(&mut self, state: &BatteryState) {
-        println!("Battery: {:.1}%", state.percentage);
-    }
-
-    fn on_ack_cfg_write(&mut self, success: bool) {
-        println!("Config write ack: {}", success);
-    }
-
-    fn on_ack_cfg_query(&mut self, config: &Config) {
-        println!("Config: {}", config);
-    }
-
-    // 板级日志回调（默认实现通过 log 库输出）
-    fn on_log(&mut self, ts: u64, log_msg: &LogMessage) {
-        println!("[Board][{}] {}: {}", ts, log_msg.fun_name, log_msg.msg);
-    }
-}
-
-driver.register_callback(MyCallback { imu_count: 0 });
-```
-
-> **注意**：回调在独立的分发线程上触发，不会阻塞读取线程。
-
-### 回调方法列表
-
-| 方法 | 触发时机 | 默认行为 |
-|------|---------|---------|
-| `on_imu_data` | IMU 数据帧 (100Hz) | 空 |
-| `on_power_data` | 电源数据帧 (20Hz) | 空 |
-| `on_thermal_data` | 温度数据帧 (5Hz) | 空 |
-| `on_battery_state` | 电池状态帧 (10Hz) | 空 |
-| `on_system_info` | 系统信息帧 (1Hz) | 空 |
-| `on_config_snapshot` | 配置快照帧 | 空 |
-| `on_board_event` | 事件帧 (1Hz) | 空 |
-| `on_log(ts, log_msg)` | 板级日志帧 | 通过 `log` 库输出，带 `[ServoRobotBoard]` 前缀和时间戳 |
-| `on_ack_cfg_write` | 配置写入确认 | 空 |
-| `on_ack_cfg_query` | 单个配置查询响应 | 空 |
-| `on_ack_cfg_query_all` | 所有配置查询响应 | 空 |
-| `on_error` | 驱动错误 | 空 |
-
-## 日志系统
-
-### 板级日志
-
-STM32 上行的 `Log` 帧通过 `DriverCallback::on_log` 分发。默认实现通过 `log` 库输出，带 `[ServoRobotBoard]` 前缀和时间戳：
-
-```
-[ServoRobotBoard] [14:30:05] config.c::handle_query: queried PowerServoCurrentLimit
-[ServoRobotBoard] [14:30:06] imu.c::read_gyro: sensor timeout
-[ServoRobotBoard] [14:30:07] main.c::app_init: boot complete
-```
-
-日志级别映射：`LogLevel::Error` → `log::error!`，`Warn` → `log::warn!`，`Info` → `log::info!`，`Debug` → `log::debug!`
-
-### 自定义日志处理
-
-覆盖 `on_log` 方法可自定义日志行为（如显示在 TUI 面板、发布到 ROS2 话题）：
-
-```rust
-impl DriverCallback for MyCallback {
-    fn on_log(&mut self, ts: u64, log_msg: &LogMessage) {
-        // 自定义处理，不再输出到 log
-        self.log_buffer.push(format!("[{}] {}::{}: {}",
-            ts, log_msg.file_name, log_msg.fun_name, log_msg.msg));
-    }
-}
-```
-
-### 使用 log 后端
-
-接入任意 `log` 后端即可看到默认的板级日志输出：
-
-```rust
-env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
-```
-
-## 命令和配置
-
-```rust
-use servo_robot_driver::protocol::config::{Config, ConfigType};
-
-// 异步（不等待应答）
-driver.query_config(ConfigType::PowerServoCurrentLimit)?;
-driver.write_config(Config::PowerServoCurrentLimit(5.0))?;
-
-// 同步（等待应答）
-let config = driver.query_config_sync(ConfigType::PowerServoCurrentLimit)?;
-let all_config = driver.query_all_configs_sync()?;
-let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
-```
-
-## C/C++ 集成（FFI）
-
-启用 `ffi` feature 可把驱动编译为共享库（`.so`），供 C/C++ 直接调用。
-
-### 编译 .so
-
-```bash
-# 仓库根目录;必须带 --features ffi,否则 .so 内没有可调用的 sr_* 符号
-cargo build --release --features ffi
-# 产物: target/release/libservo_robot_driver.so(17 个 sr_driver_* 导出符号)
-nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
-```
-
-头文件:`include/servo_robot_driver.h`(唯一接口契约,含结构体/枚举/函数声明/线程红线)。
-
-### 一键打包(推荐)
-
-```bash
-crates/servo-robot-driver/ffi/package_ffi.sh [输出目录]
-# 默认输出到仓库根 ffi-dist/:
-#   ffi-dist/
-#   ├── CMakeLists.txt            # 已配置好导入 .so + 示例构建
-#   ├── README.md
-#   ├── include/servo_robot_driver.h
-#   ├── lib/libservo_robot_driver.so
-#   └── examples/cpp_example.cpp, c_example.c
-```
-
-整个 `ffi-dist/` 复制进 C/C++ 项目即可:
-
-```bash
-cd ffi-dist
-cmake -S . -B build && cmake --build build
-./build/cpp_example /dev/ttyUSB0 115200
-```
-
-### 手动集成
+启用 `ffi` feature 后，驱动以 C ABI 暴露 `sr_driver_*` API，头文件位于 `include/servo_robot_driver.h`。
 
 ```c
-#include "servo_robot_driver.h"   // extern "C" 已包裹,C++ 直接 include
+#include "servo_robot_driver.h"
+#include <stdio.h>
 
-sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
-sr_driver_start(d);
+// 应答回调
+static void on_response(void *ud, const SrResponse *resp) {
+    printf("Response: kind=%d success=%d\n", resp->request_kind, resp->success);
+}
 
-sr_board_config cfg;
-sr_driver_query_all_configs(d, &cfg);        // 同步,阻塞 ≤1s
-sr_driver_write_config_sync(d, (sr_config){.typ = SR_CONFIG_SERVO_BAUD_RATE, .value = 1000000}, &ok);
+// IMU 回调
+static void on_imu(void *ud, const SrImu *imu) {
+    printf("IMU: roll=%.1f pitch=%.1f yaw=%.1f\n", imu->roll, imu->pitch, imu->yaw);
+}
 
-sr_driver_stop(d);
-sr_driver_free(d);                            // 必须最后调用
+// 诊断回调（1Hz 推送）
+static void on_diagnostic(void *ud, const SrDiagnostic *diag) {
+    printf("CPU: %u%% uptime: %us MCU temp: %.1f°C\n",
+           diag->cpu_usage_percent, diag->uptime_s, (float)diag->temp_mcu / 10.0f);
+}
+
+int main(void) {
+    // 查询驱动版本
+    SrVersion ver = sr_driver_version();
+    printf("Driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
+    // 打开串口（支持自动重连）
+    char err[256];
+    sr_driver *drv = sr_driver_open_reconnect(
+        "/dev/ttyUSB0", 115200,
+        5,      // max_retries
+        1000,   // retry_interval_ms
+        2.0f,   // backoff_multiplier
+        10000,  // max_retry_interval_ms
+        err, sizeof(err)
+    );
+    if (!drv) {
+        fprintf(stderr, "Open failed: %s\n", err);
+        return 1;
+    }
+
+    // 注册回调
+    sr_callbacks cbs = {
+        .on_imu           = on_imu,
+        .on_diagnostic    = on_diagnostic,
+        .on_response      = on_response,
+    };
+    sr_driver_set_callbacks(drv, &cbs);
+
+    // 启动驱动
+    sr_driver_start(drv);
+
+    // ... 业务逻辑 ...
+
+    // 释放资源
+    sr_driver_free(drv);
+    return 0;
+}
 ```
 
-```bash
-gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
-    -Wl,-rpath,$PWD/target/release -o my_prog   # C++
-g++ my_prog.cpp ... 同上                          # g++ 同理
-```
+#### FFI 函数一览
 
-运行时三选一:编译时 `-Wl,-rpath` / `LD_LIBRARY_PATH` / 安装到 `/usr/local/lib` + `ldconfig`。
+| 函数 | 说明 |
+|------|------|
+| `sr_driver_version()` | 获取驱动版本号（`SrVersion`）|
+| `sr_driver_open()` | 打开串口，返回句柄 |
+| `sr_driver_open_reconnect()` | 打开串口并启用自动重连 |
+| `sr_driver_free()` | 释放句柄（自动 stop + join）|
+| `sr_driver_start()` | 启动驱动（读取线程 + 分发线程）|
+| `sr_driver_stop()` | 停止驱动 |
+| `sr_driver_write_config()` | 写入单个配置 |
+| `sr_driver_write_config_sync()` | 写入配置（同步等待应答）|
+| `sr_driver_query_config()` | 查询单个配置 |
+| `sr_driver_query_all_configs()` | 查询所有配置 |
+| `sr_driver_forward_servo()` | 转发舵机命令 |
+| `sr_driver_forward_servo_sync()` | 转发舵机命令（同步等待应答）|
+| `sr_driver_send_command()` | 发送板级命令（Reset/Shutdown/Ota）|
+| `sr_driver_send_command_sync()` | 发送命令（同步等待确认）|
+| `sr_driver_firmware_update()` | 固件更新数据块 |
+| `sr_driver_firmware_update_sync()` | 固件更新（同步等待确认）|
+| `sr_driver_set_callbacks()` | 设置/替换回调表 |
+| `sr_driver_last_error()` | 获取最近一次错误描述 |
 
-### 红线
+#### FFI 回调表
 
-- 回调在驱动**分发线程**执行;回调内禁止调用任何 `sr_driver_*`(尤其 `sr_driver_free`,自死锁)
-- 回调参数指针仅在回调执行期间有效
-- 禁止在有其他线程调用句柄时 `sr_driver_free`(use-after-free)
-- 同步函数阻塞 ≤1s(驱动默认超时)
+`sr_callbacks` 结构体包含以下可选回调（函数指针，NULL 表示不注册）：
 
-完整示例见 `ffi/c_example.c`(C 自由函数回调)与 `ffi/cpp_example.cpp`(C++ 类内回调,ROS2 节点风格);`ffi/smoke_test.c` 是内部测试,非示例。
-
-## Feature Flags
-
-| Feature | 依赖 | 说明 |
-|---------|------|------|
-| `mock` | `rand` | 启用 MockTransport 模拟传输层 |
-| `async` | `tokio` | 启用 AsyncDriver（同步 Driver 的薄门面） |
-| `ffi` | — | 启用 C FFI 层（.so 导出） |
-
+| 回调 | 说明 |
+|------|------|
+| `on_imu` | IMU 数据（100Hz）|
+| `on_power` | 电源数据（20Hz）|
+| `on_battery` | 电池状态（10Hz）|
+| `on_config` | 配置快照 |
+| `on_board_event` | 板级事件 |
+| `on_device_info` | 设备标识与内存布局（静态信息，查询后推送）|
+| `on_diagnostic` | 运行时诊断（1Hz 推送）|
+| `on_log` | 板级日志 |
+| `on_response` | 统一应答（替代原多个 `on_ack_*` 回调）|
+| `on_error` | 错误通知 |
