@@ -58,6 +58,12 @@ pub struct EventBus {
     callbacks: Arc<Mutex<Vec<Box<dyn DriverCallback>>>>,
 }
 
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventBus {
     pub fn new() -> Self {
         let (tx, rx) = flume::bounded(EVENT_CHANNEL_CAPACITY);
@@ -73,7 +79,7 @@ impl EventBus {
 
     /// 注册 trait 回调
     pub fn register_callback(&self, cb: impl DriverCallback) {
-        let mut callbacks = self.callbacks.lock().unwrap();
+        let mut callbacks = self.callbacks.lock().unwrap_or_else(|e| e.into_inner());
         callbacks.push(Box::new(cb));
     }
 
@@ -127,10 +133,13 @@ impl EventBus {
     }
 
     /// 分发事件给所有注册的回调
+    ///
+    /// 单个回调 panic 被 catch_unwind 拦截:回调运行在驱动分发线程上,
+    /// 一次 panic 不应杀死整个分发线程(否则驱动静默停止派发)。
     pub fn dispatch(&self, event: &DriverEvent) {
-        let mut callbacks = self.callbacks.lock().unwrap();
+        let mut callbacks = self.callbacks.lock().unwrap_or_else(|e| e.into_inner());
         for cb in callbacks.iter_mut() {
-            match event {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match event {
                 DriverEvent::ImuData(d) => cb.on_imu_data(d),
                 DriverEvent::PowerData(d) => cb.on_power_data(d),
                 DriverEvent::BatteryState(d) => cb.on_battery_state(d),
@@ -140,7 +149,7 @@ impl EventBus {
                 DriverEvent::Log(ts, d) => cb.on_log(*ts, d),
                 DriverEvent::Response(r) => cb.on_response(r),
                 DriverEvent::Error(e) => cb.on_error(e),
-            }
+            }));
         }
     }
 }

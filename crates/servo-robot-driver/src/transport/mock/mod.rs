@@ -20,6 +20,12 @@ pub struct MockTransport {
     core: MockCore,
 }
 
+impl Default for MockTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockTransport {
     pub fn new() -> Self {
         log::info!("MockTransport created (mock mode)");
@@ -101,7 +107,7 @@ mod tests {
     use super::*;
     use crate::protocol::config::{Config, ConfigType};
     use crate::protocol::frame::{FrameType, FromPayload, RawFrame, ToPayload};
-    use crate::protocol::request::{Request, RequestKind};
+    use crate::protocol::request::{Request, RequestType};
     use crate::protocol::response::Response;
 
     #[test]
@@ -135,7 +141,7 @@ mod tests {
         let mut mock = MockTransport::new();
 
         let query = Request::new(
-            RequestKind::ConfigQuery,
+            RequestType::ConfigQuery,
             vec![ConfigType::PowerServoCurrentLimitMa as u8],
         );
         let frame = RawFrame {

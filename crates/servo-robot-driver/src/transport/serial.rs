@@ -61,6 +61,9 @@ pub(crate) fn read_frame_from_reader(
     port_name: &str,
 ) -> Result<Vec<u8>, DriverError> {
     // 读取帧头
+    //
+    // 超时必须返回 `IoTimeout` 而不是继续循环:否则空闲串口(无任何字节)上
+    // 本函数永不返回,读线程无法回到 `running` 检查,`stop()` join 永久挂死。
     let mut header = [0u8; 1];
     loop {
         match port.read_exact(&mut header) {
@@ -69,12 +72,10 @@ pub(crate) fn read_frame_from_reader(
                     break;
                 }
             }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::TimedOut {
-                    continue;
-                }
-                return Err(DriverError::Io(e.to_string()));
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                return Err(DriverError::IoTimeout);
             }
+            Err(e) => return Err(DriverError::Io(e.to_string())),
         }
     }
 
@@ -135,5 +136,30 @@ impl Transport for SerialTransport {
         log::info!("Closing serial port: {}", self.port_name);
         // serialport crate 会在 Drop 时自动关闭
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 恒超时的空闲端口:帧头扫描循环必须快速返回 `IoTimeout`,
+    /// 不能无限循环(曾导致读线程永不返回、`stop()` join 永久挂死)。
+    #[test]
+    fn test_scan_loop_returns_on_timeout() {
+        struct IdleReader;
+        impl std::io::Read for IdleReader {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle"))
+            }
+        }
+        let mut port = IdleReader;
+        let start = std::time::Instant::now();
+        let result = read_frame_from_reader(&mut port, "test");
+        assert!(matches!(result, Err(DriverError::IoTimeout)));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "idle port must return promptly, not spin"
+        );
     }
 }

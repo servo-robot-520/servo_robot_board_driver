@@ -13,7 +13,7 @@ use crate::driver_common;
 use crate::error::DriverError;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
 use crate::protocol::frame::ToPayload;
-use crate::protocol::request::{Request, RequestKind};
+use crate::protocol::request::{Request, RequestType};
 use crate::protocol::response::Response;
 use crate::protocol::servo::ServoCmdWrapper;
 use crate::reconnect::ReconnectConfig;
@@ -45,6 +45,9 @@ pub struct Driver {
     dispatch_handle: Option<JoinHandle<()>>,
     /// 运行标志
     running: Arc<AtomicBool>,
+    /// 同步请求-响应互斥:保证同一时刻只有一个 `*_sync` 在等待应答,
+    /// 避免多线程并发时互相吞掉彼此的 ACK(共享 ACK 通道无请求关联 ID)。
+    sync_lock: Mutex<()>,
 }
 
 impl Driver {
@@ -59,6 +62,7 @@ impl Driver {
             read_handle: None,
             dispatch_handle: None,
             running: Arc::new(AtomicBool::new(false)),
+            sync_lock: Mutex::new(()),
         }
     }
 
@@ -83,6 +87,7 @@ impl Driver {
             read_handle: None,
             dispatch_handle: None,
             running: Arc::new(AtomicBool::new(false)),
+            sync_lock: Mutex::new(()),
         }
     }
 
@@ -160,8 +165,9 @@ impl Driver {
 
     /// 重新连接到指定串口
     ///
-    /// 如果驱动正在运行，会先停止当前连接，替换传输层，再重新启动。
-    /// 适用于上层自行实现重连逻辑的场景（如 FFI 调用方）。
+    /// 先打开新串口,成功后再停旧连接、替换传输层、重新启动。
+    /// 打开新串口失败时驱动保持原状(连接与运行状态都不变),
+    /// 适用于上层自行实现重连逻辑的场景(如 FFI 调用方)。
     ///
     /// # Arguments
     /// * `port` - 串口设备路径
@@ -169,14 +175,16 @@ impl Driver {
     pub fn connect(&mut self, port: &str, baud_rate: u32) -> Result<(), DriverError> {
         let was_running = self.running.load(Ordering::Relaxed);
 
-        // 停止当前连接
+        // 先尝试打开新连接:失败直接返回,驱动状态不变
+        let transport = crate::transport::serial::SerialTransport::open(port, baud_rate)
+            .map_err(|e| DriverError::Serial(e.to_string()))?;
+
+        // 打开成功后才停旧连接
         if was_running {
             self.stop()?;
         }
 
         // 替换传输层
-        let transport = crate::transport::serial::SerialTransport::open(port, baud_rate)
-            .map_err(|e| DriverError::Serial(e.to_string()))?;
         {
             let mut guard = self
                 .transport
@@ -197,8 +205,8 @@ impl Driver {
 
     /// 写入配置到 STM32（不等待应答）
     pub fn write_config(&self, config: Config) -> Result<(), DriverError> {
-        let request = Request::new(RequestKind::ConfigWrite, config.to_bytes());
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::new(RequestType::ConfigWrite, config.to_bytes());
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -212,8 +220,8 @@ impl Driver {
 
     /// 查询单个配置（不等待应答）
     pub fn query_config(&self, config_type: ConfigType) -> Result<(), DriverError> {
-        let request = Request::new(RequestKind::ConfigQuery, vec![config_type as u8]);
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::new(RequestType::ConfigQuery, vec![config_type as u8]);
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -227,8 +235,8 @@ impl Driver {
 
     /// 查询所有配置（不等待应答）
     pub fn query_all_configs(&self) -> Result<(), DriverError> {
-        let request = Request::simple(RequestKind::ConfigQueryAll);
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::simple(RequestType::ConfigQueryAll);
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -242,8 +250,8 @@ impl Driver {
 
     /// 查询设备信息（不等待应答）
     pub fn query_device_info(&self) -> Result<(), DriverError> {
-        let request = Request::simple(RequestKind::DeviceInfo);
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::simple(RequestType::DeviceInfo);
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -257,8 +265,8 @@ impl Driver {
 
     /// 转发舵机命令（不等待应答）
     pub fn forward_servo(&self, cmd: &ServoCmdWrapper) -> Result<(), DriverError> {
-        let request = Request::new(RequestKind::ServoForward, cmd.to_payload());
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::new(RequestType::ServoForward, cmd.to_payload());
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -274,8 +282,9 @@ impl Driver {
 
     /// 查询单个配置并等待响应
     pub fn query_config_sync(&self, config_type: ConfigType) -> Result<Config, DriverError> {
+        let _guard = self.begin_sync()?;
         self.query_config(config_type)?;
-        let resp = self.wait_for_response(RequestKind::ConfigQuery, DEFAULT_TIMEOUT)?;
+        let resp = self.wait_for_response(RequestType::ConfigQuery, DEFAULT_TIMEOUT)?;
         Config::from_bytes(&resp.data).map_err(|_| {
             DriverError::Frame(crate::error::FrameError::PayloadDecode("Config decode"))
         })
@@ -283,8 +292,9 @@ impl Driver {
 
     /// 查询所有配置并等待响应
     pub fn query_all_configs_sync(&self) -> Result<BoardConfigSnapshot, DriverError> {
+        let _guard = self.begin_sync()?;
         self.query_all_configs()?;
-        let resp = self.wait_for_response(RequestKind::ConfigQueryAll, DEFAULT_TIMEOUT)?;
+        let resp = self.wait_for_response(RequestType::ConfigQueryAll, DEFAULT_TIMEOUT)?;
         BoardConfigSnapshot::from_bytes(&resp.data).map_err(|_| {
             DriverError::Frame(crate::error::FrameError::PayloadDecode(
                 "ConfigSnapshot decode",
@@ -296,8 +306,9 @@ impl Driver {
     pub fn query_device_info_sync(
         &self,
     ) -> Result<crate::protocol::device_info::DeviceInfo, DriverError> {
+        let _guard = self.begin_sync()?;
         self.query_device_info()?;
-        let resp = self.wait_for_response(RequestKind::DeviceInfo, DEFAULT_TIMEOUT)?;
+        let resp = self.wait_for_response(RequestType::DeviceInfo, DEFAULT_TIMEOUT)?;
         crate::protocol::device_info::DeviceInfo::from_bytes(&resp.data).map_err(|_| {
             DriverError::Frame(crate::error::FrameError::PayloadDecode("DeviceInfo decode"))
         })
@@ -305,8 +316,9 @@ impl Driver {
 
     /// 写入配置并等待确认
     pub fn write_config_sync(&self, config: Config) -> Result<bool, DriverError> {
+        let _guard = self.begin_sync()?;
         self.write_config(config)?;
-        self.wait_for_response(RequestKind::ConfigWrite, DEFAULT_TIMEOUT)
+        self.wait_for_response(RequestType::ConfigWrite, DEFAULT_TIMEOUT)
             .map(|r| r.success)
     }
 
@@ -315,15 +327,16 @@ impl Driver {
         &self,
         cmd: &ServoCmdWrapper,
     ) -> Result<ServoCmdWrapper, DriverError> {
+        let _guard = self.begin_sync()?;
         self.forward_servo(cmd)?;
-        let resp = self.wait_for_response(RequestKind::ServoForward, DEFAULT_TIMEOUT)?;
+        let resp = self.wait_for_response(RequestType::ServoForward, DEFAULT_TIMEOUT)?;
         Ok(ServoCmdWrapper::new(resp.data))
     }
 
     /// 发送系统控制命令（Reset/Shutdown/Ota，不等待应答）
-    pub fn send_command(&self, kind: RequestKind) -> Result<(), DriverError> {
+    pub fn send_command(&self, kind: RequestType) -> Result<(), DriverError> {
         let request = Request::simple(kind);
-        let encoded = driver_common::encode_request(&request);
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -339,7 +352,8 @@ impl Driver {
     ///
     /// 对于 fire-and-forget 命令（Reset/Shutdown/Ota），发送后立即返回 Ok(true)。
     /// 对于需要应答的命令，等待 Response 并返回 success 状态。
-    pub fn send_command_sync(&self, kind: RequestKind) -> Result<bool, DriverError> {
+    pub fn send_command_sync(&self, kind: RequestType) -> Result<bool, DriverError> {
+        let _guard = self.begin_sync()?;
         self.send_command(kind)?;
         if kind.expects_response() {
             self.wait_for_response(kind, DEFAULT_TIMEOUT)
@@ -354,8 +368,8 @@ impl Driver {
         let mut payload = Vec::with_capacity(4 + data.len());
         payload.extend_from_slice(&offset.to_le_bytes());
         payload.extend_from_slice(data);
-        let request = Request::new(RequestKind::FirmwareUpdate, payload);
-        let encoded = driver_common::encode_request(&request);
+        let request = Request::new(RequestType::FirmwareUpdate, payload);
+        let encoded = driver_common::encode_request(&request)?;
         let mut transport = self
             .transport
             .lock()
@@ -369,17 +383,33 @@ impl Driver {
 
     /// 发送固件更新数据并等待响应
     pub fn firmware_update_sync(&self, offset: u32, data: &[u8]) -> Result<bool, DriverError> {
+        let _guard = self.begin_sync()?;
         self.firmware_update(offset, data)?;
-        self.wait_for_response(RequestKind::FirmwareUpdate, DEFAULT_TIMEOUT)
+        self.wait_for_response(RequestType::FirmwareUpdate, DEFAULT_TIMEOUT)
             .map(|r| r.success)
     }
 
     // ═══ 等待应答 ═══
 
+    /// 同步操作入口:串行化 + 排空陈旧 ACK。
+    ///
+    /// 持有 `sync_lock` 直到等待结束,保证多线程 `*_sync` 不会互相吞应答。
+    /// 排空 ACK 通道中所有无人等待的遗留应答(先前超时的迟到 ACK、
+    /// fire-and-forget 发送触发的应答),否则下一次同类型同步等待会
+    /// 立即消费陈旧 ACK,返回上一条请求的结果。
+    fn begin_sync(&self) -> Result<std::sync::MutexGuard<'_, ()>, DriverError> {
+        let guard = self
+            .sync_lock
+            .lock()
+            .map_err(|_| DriverError::LockPoisoned)?;
+        while let Ok(Some(_)) = self.bus.try_recv_ack() {}
+        Ok(guard)
+    }
+
     /// 等待指定 RequestKind 的 Response
     fn wait_for_response(
         &self,
-        kind: RequestKind,
+        kind: RequestType,
         timeout: Duration,
     ) -> Result<Response, DriverError> {
         let deadline = std::time::Instant::now() + timeout;
@@ -389,7 +419,7 @@ impl Driver {
                 return Err(DriverError::Timeout);
             }
             match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::Response(resp) if resp.request_kind == kind => return Ok(resp),
+                DriverEvent::Response(resp) if resp.request_type == kind => return Ok(resp),
                 _ => continue,
             }
         }
@@ -478,15 +508,19 @@ impl Driver {
                         data
                     }
                     Err(DriverError::IoTimeout) => {
+                        // 空闲超时:回到循环头检查 running,stop() 才能 join 退出
                         continue;
                     }
-                    Err(DriverError::TransportClosed) => {
-                        // 连接断开
-                        log::warn!("Connection lost");
+                    Err(e) => {
+                        // 除超时外,所有读错误(TransportClosed / Io / 其他)一律视为连接断开:
+                        // 清空传输层并重连/退出。若只 continue,持续错误会在无 sleep 的热循环里
+                        // 空转(占用 CPU + 刷错误事件),且无工厂时永远无法退出。
+                        state.set_error(e.clone());
+                        let _ = bus.sender().send(DriverEvent::Error(e));
+                        log::warn!("Read error, treating as connection loss");
                         state.set_connected(false);
                         *transport_guard = None;
 
-                        // 尝试重连
                         if let Some(ref factory) = transport_factory {
                             drop(transport_guard);
                             if !Self::attempt_reconnect(
@@ -507,11 +541,6 @@ impl Driver {
                                 .send(DriverEvent::Error(DriverError::TransportClosed));
                             break;
                         }
-                        continue;
-                    }
-                    Err(e) => {
-                        state.set_error(e.clone());
-                        let _ = bus.sender().send(DriverEvent::Error(e));
                         continue;
                     }
                 }
@@ -593,5 +622,110 @@ impl Driver {
 impl Drop for Driver {
     fn drop(&mut self) {
         let _ = self.stop();
+    }
+}
+
+#[cfg(all(test, feature = "mock"))]
+mod tests {
+    use super::*;
+    use crate::transport::MockTransport;
+    use crate::protocol::response::Response;
+
+    /// 同步操作入口必须排空遗留 ACK(超时迟到 / fire-and-forget 应答),
+    /// 否则下一次同类型同步等待会立即消费陈旧应答、返回上一条请求的结果。
+    #[test]
+    fn test_begin_sync_drains_stale_acks() {
+        let driver = Driver::new(MockTransport::new());
+        for _ in 0..3 {
+            driver
+                .bus
+                .ack_sender()
+                .send(DriverEvent::Response(Response::simple(
+                    RequestType::ConfigWrite,
+                    true,
+                )))
+                .unwrap();
+        }
+        let _guard = driver.begin_sync().unwrap();
+        assert!(
+            matches!(driver.bus.try_recv_ack(), Ok(None)),
+            "stale ACKs must be drained before sync wait"
+        );
+    }
+
+    /// 空闲传输层(只返回 IoTimeout)下 stop() 必须能 join 退出,不能挂死。
+    /// 曾因串口帧头扫描循环吞掉超时,读线程永不返回 → join 永久阻塞。
+    #[test]
+    fn test_stop_with_idle_transport() {
+        struct IdleTransport;
+        impl Transport for IdleTransport {
+            fn read_frame(&mut self) -> Result<Vec<u8>, DriverError> {
+                std::thread::sleep(Duration::from_millis(20));
+                Err(DriverError::IoTimeout)
+            }
+            fn write_frame(&mut self, _frame: &[u8]) -> Result<(), DriverError> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<(), DriverError> {
+                Ok(())
+            }
+        }
+
+        let mut driver = Driver::new(IdleTransport);
+        driver.start().unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let _ = tx.send(driver.stop());
+        });
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("stop() must return within 2s on idle transport")
+            .unwrap();
+        handle.join().unwrap();
+    }
+
+    /// 无应答的传输层(只回 IoTimeout):同步查询必须超时,不能无限等待
+    #[test]
+    fn test_sync_timeout_when_no_ack() {
+        struct NoAckTransport;
+        impl Transport for NoAckTransport {
+            fn read_frame(&mut self) -> Result<Vec<u8>, DriverError> {
+                std::thread::sleep(Duration::from_millis(10));
+                Err(DriverError::IoTimeout)
+            }
+            fn write_frame(&mut self, _frame: &[u8]) -> Result<(), DriverError> {
+                Ok(())
+            }
+            fn close(&mut self) -> Result<(), DriverError> {
+                Ok(())
+            }
+        }
+
+        let mut driver = Driver::new(NoAckTransport);
+        driver.start().unwrap();
+        let start = std::time::Instant::now();
+        let r = driver.query_config_sync(ConfigType::SwitchServoPower);
+        assert!(matches!(r, Err(DriverError::Timeout)));
+        // 等待上限 1s:确认按超时返回而非挂死(上限放宽以容忍并行测试负载)
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "sync wait must time out, not hang"
+        );
+        driver.stop().unwrap();
+    }
+
+    /// payload 超协议上限(255B)的请求必须被拒绝,不能生成 LEN 截断的损坏帧。
+    #[test]
+    fn test_encode_request_payload_limit() {
+        // 254B data + 1B kind = 255 = 上限,允许
+        let ok = Request::new(RequestType::ServoForward, vec![0u8; 254]);
+        assert!(driver_common::encode_request(&ok).is_ok());
+        // 255B data + 1B kind = 256 > 上限,拒绝
+        let too_big = Request::new(RequestType::ServoForward, vec![0u8; 255]);
+        assert!(matches!(
+            driver_common::encode_request(&too_big),
+            Err(DriverError::PayloadTooLarge { max: 255, .. })
+        ));
     }
 }

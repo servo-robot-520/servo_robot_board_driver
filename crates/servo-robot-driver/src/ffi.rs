@@ -7,6 +7,11 @@
 //! - 所有函数用 `catch_unwind` 包裹,Rust panic 不会跨 FFI 传播
 //! - 同步函数阻塞 ≤1s(驱动默认超时)
 //! - 回调在驱动内部的分发线程触发;回调内禁止调用任何 `sr_driver_*`(会死锁)
+//!
+//! `not_unsafe_ptr_arg_deref` 全局豁免:这是 C ABI 层,所有函数签名必须保持
+//! `safe extern "C"`(C 侧无 unsafe 概念,标记 unsafe 反而误导调用方);
+//! 空指针与悬垂指针的防护契约见头文件顶部"红线"说明。
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 pub mod callback;
 
@@ -14,7 +19,7 @@ use crate::driver::Driver;
 use crate::error::DriverError;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
 use crate::protocol::device_info::DeviceInfo;
-use crate::protocol::request::RequestKind;
+use crate::protocol::request::RequestType;
 use crate::protocol::servo::ServoCmdWrapper;
 use crate::transport::serial::SerialTransport;
 use callback::{CallbackTable, CffiCallback, SrCallbacks};
@@ -196,9 +201,9 @@ fn err_code(e: &DriverError) -> i32 {
         DriverError::TransportClosed => SR_ERR_TRANSPORT_CLOSED,
         DriverError::Timeout => SR_ERR_TIMEOUT,
         DriverError::IoTimeout => SR_ERR_TIMEOUT,
-        DriverError::CrcMismatch { .. } => SR_ERR_CRC,
         DriverError::PayloadTooShort { .. } => SR_ERR_PAYLOAD_TOO_SHORT,
-        DriverError::UnknownFrameType(_) => SR_ERR_UNKNOWN_FRAME,
+        // 入参超出协议 payload 上限:视为调用方参数非法
+        DriverError::PayloadTooLarge { .. } => SR_ERR_INVALID_ARG,
         DriverError::NotRunning => SR_ERR_NOT_RUNNING,
         DriverError::AlreadyStarted => SR_ERR_ALREADY_STARTED,
         DriverError::LockPoisoned => SR_ERR_LOCK_POISONED,
@@ -353,8 +358,8 @@ pub extern "C" fn sr_driver_open(
 
 /// 重新连接到指定串口（上层实现重连逻辑时使用）
 ///
-/// 如果驱动正在运行，会先停止当前连接，打开新串口，再重新启动。
-/// 失败时返回错误码，驱动状态不变。
+/// 先打开新串口，成功后再停止当前连接并重新启动。
+/// 打开新串口失败时返回错误码，驱动连接与运行状态保持不变。
 ///
 /// @param d         驱动句柄
 /// @param port      新的串口设备路径
@@ -380,11 +385,11 @@ pub extern "C" fn sr_driver_connect(d: *mut SrDriver, port: *const c_char, baud_
         Ok(Ok(())) => SR_OK,
         Ok(Err(e)) => {
             let code = err_code(&e);
-            let _ = set_last_error(unsafe { &mut *d }, &e.to_string());
+            set_last_error(unsafe { &mut *d }, &e.to_string());
             code
         }
         Err(_) => {
-            let _ = set_last_error(unsafe { &mut *d }, "panic in sr_driver_connect");
+            set_last_error(unsafe { &mut *d }, "panic in sr_driver_connect");
             SR_ERR_PANIC
         }
     }
@@ -564,7 +569,7 @@ pub extern "C" fn sr_driver_send_command(d: *mut SrDriver, cmd: u8) -> i32 {
     if d.is_null() {
         return SR_ERR_NULL;
     }
-    let Some(kind) = RequestKind::from_u8(cmd) else {
+    let Some(kind) = RequestType::from_u8(cmd) else {
         return SR_ERR_INVALID_ARG;
     };
     guard(d, |d| d.send_command(kind))
@@ -579,7 +584,7 @@ pub extern "C" fn sr_driver_send_command_sync(
     if d.is_null() {
         return SR_ERR_NULL;
     }
-    let Some(kind) = RequestKind::from_u8(cmd) else {
+    let Some(kind) = RequestType::from_u8(cmd) else {
         return SR_ERR_INVALID_ARG;
     };
     if out_success.is_null() {
@@ -640,19 +645,39 @@ pub extern "C" fn sr_driver_firmware_update_sync(
 
 // ═══ 回调 ═══
 
-/// 设置/替换 C 回调表(NULL 指针的槽位被忽略);任意时刻可调用
+/// 设置 C 回调表:与现有表按槽合并,NULL 槽位保留原回调,非 NULL 槽位替换;
+/// userdata 始终更新为本次传入值。任意时刻可调用。
 #[unsafe(no_mangle)]
 pub extern "C" fn sr_driver_set_callbacks(d: *mut SrDriver, cbs: *const SrCallbacks) -> i32 {
     if d.is_null() || cbs.is_null() {
         return SR_ERR_NULL;
     }
     guard(d, |_| {
-        let table = unsafe { *cbs };
+        let incoming = unsafe { *cbs };
         let mut slot = unsafe { &*d }
             .callbacks
             .lock()
             .map_err(|_| DriverError::LockPoisoned)?;
-        slot.0 = Some(table);
+        let current = slot.0.unwrap_or_default();
+        slot.0 = Some(SrCallbacks {
+            userdata: incoming.userdata,
+            on_imu_data: incoming.on_imu_data.or(current.on_imu_data),
+            on_power_data: incoming.on_power_data.or(current.on_power_data),
+            on_battery_state: incoming.on_battery_state.or(current.on_battery_state),
+            on_config_snapshot: incoming.on_config_snapshot.or(current.on_config_snapshot),
+            on_board_event: incoming.on_board_event.or(current.on_board_event),
+            on_diagnostic: incoming.on_diagnostic.or(current.on_diagnostic),
+            on_log: incoming.on_log.or(current.on_log),
+            on_ack_device_info: incoming.on_ack_device_info.or(current.on_ack_device_info),
+            on_ack_cfg_write: incoming.on_ack_cfg_write.or(current.on_ack_cfg_write),
+            on_ack_cfg_query: incoming.on_ack_cfg_query.or(current.on_ack_cfg_query),
+            on_ack_cfg_query_all: incoming.on_ack_cfg_query_all.or(current.on_ack_cfg_query_all),
+            on_ack_servo_cmd: incoming.on_ack_servo_cmd.or(current.on_ack_servo_cmd),
+            on_ack_command: incoming.on_ack_command.or(current.on_ack_command),
+            on_ack_firmware_update: incoming.on_ack_firmware_update.or(current.on_ack_firmware_update),
+            on_error: incoming.on_error.or(current.on_error),
+            on_ack_failed: incoming.on_ack_failed.or(current.on_ack_failed),
+        });
         Ok(())
     })
 }
@@ -850,13 +875,13 @@ mod tests {
     }
 
     #[test]
-    fn test_forward_servo_sync_timeout() {
+    fn test_forward_servo_sync_echo() {
         let d = boxed_ptr();
         assert_eq!(sr_driver_start(d), SR_OK);
         let data = [0x01u8, 0x02];
         let mut out = [0u8; 64];
         let mut out_len = 0usize;
-        // mock 不对舵机帧回 ACK → 1s 超时
+        // mock 对舵机帧回空 ACK → 同步往返成功,应答长度 0
         assert_eq!(
             sr_driver_forward_servo_sync(
                 d,
@@ -866,8 +891,9 @@ mod tests {
                 out.len(),
                 &mut out_len
             ),
-            SR_ERR_TIMEOUT
+            SR_OK
         );
+        assert_eq!(out_len, 0);
         assert_eq!(sr_driver_stop(d), SR_OK);
         sr_driver_free(d);
     }
@@ -894,6 +920,32 @@ mod tests {
         assert_eq!(sr_driver_set_callbacks(d, ptr::null()), SR_ERR_NULL);
         let cbs = SrCallbacks::default();
         assert_eq!(sr_driver_set_callbacks(d, &cbs), SR_OK);
+        sr_driver_free(d);
+    }
+
+    /// 回调表按槽合并:NULL 槽位保留原回调,非 NULL 槽位替换
+    #[test]
+    fn test_set_callbacks_merges_slots() {
+        extern "C" fn on_imu(_u: *mut std::ffi::c_void, _d: *const SrImu) {}
+        extern "C" fn on_power(_u: *mut std::ffi::c_void, _d: *const SrPower) {}
+        let d = boxed_ptr();
+
+        let mut cbs = SrCallbacks::default();
+        cbs.on_imu_data = Some(on_imu);
+        assert_eq!(sr_driver_set_callbacks(d, &cbs), SR_OK);
+
+        // 第二次只填 on_power_data:已注册的 on_imu_data 必须保留
+        let mut cbs2 = SrCallbacks::default();
+        cbs2.on_power_data = Some(on_power);
+        assert_eq!(sr_driver_set_callbacks(d, &cbs2), SR_OK);
+
+        let table = unsafe { &*d }.callbacks.lock().unwrap().0.unwrap();
+        assert!(
+            table.on_imu_data.is_some(),
+            "existing non-NULL slot must be kept"
+        );
+        assert!(table.on_power_data.is_some(), "new slot must be set");
+        assert!(table.on_error.is_none());
         sr_driver_free(d);
     }
 
@@ -927,7 +979,7 @@ mod tests {
             if IMU_CALLED.load(Ordering::SeqCst) {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(20));
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert!(
             IMU_CALLED.load(Ordering::SeqCst),

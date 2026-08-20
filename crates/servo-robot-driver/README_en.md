@@ -236,7 +236,7 @@ impl DriverCallback for MyCallback {
             diag.cpu_usage_percent, diag.free_heap_kb, diag.temp_mcu as f32 / 10.0);
     }
 
-    fn on_device_info(&mut self, info: &DeviceInfo) {
+    fn on_ack_device_info(&mut self, info: &DeviceInfo) {
         println!("Device: id={:#06x}, FW={}, RAM={}KB",
             info.device_id, info.firmware_version, info.ram_kb);
     }
@@ -367,7 +367,7 @@ impl DriverCallback for MyCallback {
     // Unified response callback (replaces old on_ack_cfg_write / on_ack_cfg_query / etc.)
     fn on_response(&mut self, resp: &Response) {
         println!("Response: kind={:?}, success={}, data_len={}",
-            resp.request_kind, resp.success, resp.data.len());
+            resp.request_type, resp.success, resp.data.len());
     }
 
     // Board log callback (default: output via log crate)
@@ -556,6 +556,7 @@ Optional callbacks in `sr_callbacks` (NULL = not registered):
 | `on_ack_servo_cmd` | Servo command response |
 | `on_ack_command` | System command ACK (Reset/Shutdown/Ota) |
 | `on_ack_firmware_update` | Firmware update ACK |
+| `on_ack_failed` | Data-carrying ACK failed (DeviceInfo/ConfigQuery/ConfigQueryAll rejected or unparseable; the corresponding `on_ack_*` callback is NOT fired) |
 | `on_log` | Board log |
 | `on_error` | Error notification |
 
@@ -565,6 +566,7 @@ Optional callbacks in `sr_callbacks` (NULL = not registered):
 - Callback argument pointers are valid only during the callback
 - Never `sr_driver_free` while other threads still use the handle (use-after-free)
 - Sync functions block ≤1s (driver default timeout)
+- Sync request-response calls (`*_sync`) are **serialized** inside the driver: only one sync call waits for a response at a time; concurrent `*_sync` calls queue (each blocks ≤1s). Before every sync call, stale responses (late ACKs from timed-out calls, ACKs of fire-and-forget sends) are drained so they cannot satisfy the next wait.
 
 ## Feature Flags
 

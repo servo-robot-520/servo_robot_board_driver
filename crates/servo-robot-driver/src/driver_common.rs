@@ -8,19 +8,30 @@
 //! Driver shares functions
 
 use crate::dispatch::DriverEvent;
+use crate::error::DriverError;
 use crate::protocol::config::BoardConfigSnapshot;
 use crate::protocol::frame::{FrameType, RawFrame, ToPayload, TypedFrame};
-use crate::protocol::request::{Request, RequestKind};
+use crate::protocol::request::{Request, RequestType};
 use crate::state::DriverState;
 use std::sync::Arc;
 
 /// 构建 Request 帧并编码（统一入口，替代原 6 个 encode_* 函数）
-pub(crate) fn encode_request(request: &Request) -> Vec<u8> {
-    RawFrame {
-        frame_type: FrameType::Request,
-        payload: request.to_payload(),
+///
+/// 超出协议 payload 上限(255B)的请求直接拒绝,避免生成 MCU 无法解析的帧
+/// (LEN 截断/固件缓冲区溢出)。
+pub(crate) fn encode_request(request: &Request) -> Result<Vec<u8>, DriverError> {
+    let payload = request.to_payload();
+    if payload.len() > crate::protocol::frame::MAX_PAYLOAD_SIZE {
+        return Err(DriverError::PayloadTooLarge {
+            max: crate::protocol::frame::MAX_PAYLOAD_SIZE,
+            got: payload.len(),
+        });
     }
-    .encode()
+    Ok(RawFrame {
+        frame_type: FrameType::Request,
+        payload,
+    }
+    .encode())
 }
 
 /// 解码原始帧数据并分发为 DriverEvent
@@ -88,22 +99,21 @@ pub(crate) fn decode_and_dispatch(
             return None;
         }
         TypedFrame::Response(response) => {
-            // 根据 request_kind 更新内部状态
-            match response.request_kind {
-                RequestKind::ConfigQueryAll | RequestKind::ConfigQuery => {
-                    if response.success {
-                        if let Ok(snapshot) = BoardConfigSnapshot::from_bytes(&response.data) {
-                            state.update_config(snapshot);
-                        }
+            // 根据 request_type 更新内部状态
+            match response.request_type {
+                RequestType::ConfigQueryAll | RequestType::ConfigQuery => {
+                    if response.success
+                        && let Ok(snapshot) = BoardConfigSnapshot::from_bytes(&response.data)
+                    {
+                        state.update_config(snapshot);
                     }
                 }
-                RequestKind::DeviceInfo => {
-                    if response.success {
-                        if let Ok(info) =
+                RequestType::DeviceInfo => {
+                    if response.success
+                        && let Ok(info) =
                             crate::protocol::device_info::DeviceInfo::from_bytes(&response.data)
-                        {
-                            state.update_device_info(info);
-                        }
+                    {
+                        state.update_device_info(info);
                     }
                 }
                 _ => {}

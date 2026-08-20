@@ -17,6 +17,7 @@ use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::LogMessage;
 use crate::protocol::power::PowerData;
+use crate::protocol::response::Response;
 use crate::protocol::servo::ServoCmdWrapper;
 use std::ffi::{CString, c_void};
 use std::sync::{Arc, Mutex};
@@ -45,6 +46,9 @@ pub struct SrCallbacks {
     pub on_ack_command: Option<extern "C" fn(*mut c_void, u8)>,
     pub on_ack_firmware_update: Option<extern "C" fn(*mut c_void, u8, u32)>,
     pub on_error: Option<extern "C" fn(*mut c_void, i32)>,
+    // 数据型应答失败(DeviceInfo/ConfigQuery/ConfigQueryAll NACK 或解析失败),
+    // 参数为 request_type。字段追加在末尾,保持既有字段偏移不变。
+    pub on_ack_failed: Option<extern "C" fn(*mut c_void, u8)>,
 }
 
 /// 可空回调表容器。`userdata` 是裸指针(非 Send),由 C 调用方契约保证
@@ -216,7 +220,7 @@ impl DriverCallback for CffiCallback {
     fn on_ack_device_info(&mut self, info: &DeviceInfo) {
         let sr = super::to_sr_device_info(info);
         self.with_table(|cb| {
-            if let Some(f) = cb.on_device_info {
+            if let Some(f) = cb.on_ack_device_info {
                 f(cb.userdata, &sr)
             }
         });
@@ -269,6 +273,15 @@ impl DriverCallback for CffiCallback {
         self.with_table(|cb| {
             if let Some(f) = cb.on_ack_firmware_update {
                 f(cb.userdata, success as u8, offset)
+            }
+        });
+    }
+
+    fn on_ack_failed(&mut self, response: &Response) {
+        let kind = response.request_type as u8;
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_failed {
+                f(cb.userdata, kind)
             }
         });
     }

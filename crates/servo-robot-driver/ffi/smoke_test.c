@@ -62,7 +62,7 @@ int main(void) {
     memset(&cbs, 0, sizeof(cbs));
     CHECK(cbs.on_imu_data == NULL, "zeroed callbacks: on_imu_data is NULL");
     CHECK(cbs.on_diagnostic == NULL, "zeroed callbacks: on_diagnostic is NULL");
-    CHECK(cbs.on_device_info == NULL, "zeroed callbacks: on_device_info is NULL");
+    CHECK(cbs.on_ack_device_info == NULL, "zeroed callbacks: on_ack_device_info is NULL");
 
     if (failures == 0) {
         printf("\nAll smoke tests passed.\n");

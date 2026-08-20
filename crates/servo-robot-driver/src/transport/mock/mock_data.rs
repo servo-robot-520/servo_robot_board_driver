@@ -21,6 +21,12 @@ pub struct ImuSimulator {
     pub last_update: Instant,
 }
 
+impl Default for ImuSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ImuSimulator {
     pub fn new() -> Self {
         let now = Instant::now();
@@ -57,12 +63,7 @@ impl ImuSimulator {
         if self.roll < -PI {
             self.roll += 2.0 * PI;
         }
-        if self.pitch > PI / 2.0 {
-            self.pitch = PI / 2.0;
-        }
-        if self.pitch < -PI / 2.0 {
-            self.pitch = -PI / 2.0;
-        }
+        self.pitch = self.pitch.clamp(-PI / 2.0, PI / 2.0);
         if self.yaw > PI {
             self.yaw -= 2.0 * PI;
         }
@@ -114,6 +115,12 @@ pub struct PowerSimulator {
     pub charging: bool,
 }
 
+impl Default for PowerSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PowerSimulator {
     pub fn new() -> Self {
         PowerSimulator {
@@ -125,11 +132,9 @@ impl PowerSimulator {
     pub fn generate(&mut self) -> crate::protocol::power::PowerData {
         let mut rng = rand::rng();
 
-        if self.charging {
-            self.battery_voltage = (self.battery_voltage + 0.005f32).min(16.8);
-        } else {
-            self.battery_voltage = (self.battery_voltage - 0.002f32).max(12.0);
-        }
+        // 充电缓慢上升(≤16.8V),放电缓慢下降(≥12.0V)
+        let delta = if self.charging { 0.005f32 } else { -0.002f32 };
+        self.battery_voltage = (self.battery_voltage + delta).clamp(12.0, 16.8);
 
         let (charge_voltage, charge_current): (f32, f32) = if self.charging {
             (
@@ -170,6 +175,12 @@ pub struct BatterySimulator {
     pub percentage: f32,
     pub charging: bool,
     pub cell_count: usize,
+}
+
+impl Default for BatterySimulator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BatterySimulator {
@@ -242,6 +253,12 @@ pub struct DeviceInfoSimulator {
     pub generated: bool,
 }
 
+impl Default for DeviceInfoSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeviceInfoSimulator {
     pub fn new() -> Self {
         DeviceInfoSimulator { generated: false }
@@ -270,6 +287,12 @@ pub struct DiagnosticSimulator {
     pub charging: bool,
     pub base_temp: f32,
     pub runtime_secs: f32,
+}
+
+impl Default for DiagnosticSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DiagnosticSimulator {
@@ -327,6 +350,12 @@ pub struct EventSimulator {
     pub event_count: u32,
 }
 
+impl Default for EventSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventSimulator {
     pub fn new() -> Self {
         EventSimulator {
@@ -351,16 +380,16 @@ impl EventSimulator {
         };
 
         // 偶尔触发保护事件
-        let protection_flags = if self.event_count % 500 == 0 {
+        let protection_flags = if self.event_count.is_multiple_of(500) {
             crate::protocol::event::ProtectionFlags::SERVO_OVERCURRENT
         } else {
             crate::protocol::event::ProtectionFlags::empty()
         };
 
         // 偶尔触发错误事件
-        let error_flags = if self.event_count % 800 == 0 {
+        let error_flags = if self.event_count.is_multiple_of(800) {
             crate::protocol::event::ErrorFlags::UART1_ERROR
-        } else if self.event_count % 1200 == 0 {
+        } else if self.event_count.is_multiple_of(1200) {
             crate::protocol::event::ErrorFlags::I2C1_ERROR
         } else {
             crate::protocol::event::ErrorFlags::empty()

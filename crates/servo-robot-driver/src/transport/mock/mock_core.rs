@@ -112,11 +112,11 @@ impl MockCore {
         if !self.connected {
             return true;
         }
-        if let Some(threshold) = self.auto_disconnect_frames {
-            if self.frame_count >= threshold {
-                self.connected = false;
-                return true;
-            }
+        if let Some(threshold) = self.auto_disconnect_frames
+            && self.frame_count >= threshold
+        {
+            self.connected = false;
+            return true;
         }
         false
     }
@@ -239,7 +239,7 @@ impl MockCore {
     }
 
     fn handle_write(&mut self, frame: &[u8]) {
-        use crate::protocol::request::{Request, RequestKind};
+        use crate::protocol::request::{Request, RequestType};
         use crate::protocol::response::Response;
 
         if let Ok((raw, _)) = RawFrame::decode(frame) {
@@ -252,13 +252,13 @@ impl MockCore {
             };
 
             match request.kind {
-                RequestKind::ConfigQuery => {
+                RequestType::ConfigQuery => {
                     if !request.data.is_empty() {
                         let config_type = ConfigType::from_u8(request.data[0]);
                         if let Some(ct) = config_type {
                             let config = Config::from_type_value(ct, self.get_config_value(ct));
                             let resp =
-                                Response::new(RequestKind::ConfigQuery, true, config.to_bytes());
+                                Response::new(RequestType::ConfigQuery, true, config.to_bytes());
                             let frame = RawFrame {
                                 frame_type: FrameType::Response,
                                 payload: resp.to_payload(),
@@ -273,9 +273,9 @@ impl MockCore {
                         }
                     }
                 }
-                RequestKind::ConfigQueryAll => {
+                RequestType::ConfigQueryAll => {
                     let resp =
-                        Response::new(RequestKind::ConfigQueryAll, true, self.config.to_bytes());
+                        Response::new(RequestType::ConfigQueryAll, true, self.config.to_bytes());
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
                         payload: resp.to_payload(),
@@ -288,10 +288,10 @@ impl MockCore {
                         "queried all configs",
                     );
                 }
-                RequestKind::ConfigWrite => {
+                RequestType::ConfigWrite => {
                     if let Ok(config) = Config::from_bytes(&request.data) {
                         self.update_config(config);
-                        let resp = Response::simple(RequestKind::ConfigWrite, true);
+                        let resp = Response::simple(RequestType::ConfigWrite, true);
                         let frame = RawFrame {
                             frame_type: FrameType::Response,
                             payload: resp.to_payload(),
@@ -302,11 +302,11 @@ impl MockCore {
                             LogLevel::Info,
                             "config.rs",
                             "handle_write",
-                            &format!("config updated"),
+                            "config updated",
                         );
                     }
                 }
-                RequestKind::Reset | RequestKind::Shutdown | RequestKind::Ota => {
+                RequestType::Reset | RequestType::Shutdown | RequestType::Ota => {
                     let resp = Response::simple(request.kind, true);
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
@@ -320,30 +320,30 @@ impl MockCore {
                         &format!("{} executed", request.kind),
                     );
                 }
-                RequestKind::DeviceInfo => {
+                RequestType::DeviceInfo => {
                     let info = self.device_info.generate();
-                    let resp = Response::new(RequestKind::DeviceInfo, true, info.to_bytes());
+                    let resp = Response::new(RequestType::DeviceInfo, true, info.to_bytes());
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
                         payload: resp.to_payload(),
                     };
                     self.priority_queue.push_back(frame.encode());
                 }
-                RequestKind::ServoForward => {
+                RequestType::ServoForward => {
                     // Mock: echo back empty servo response
-                    let resp = Response::new(RequestKind::ServoForward, true, Vec::new());
+                    let resp = Response::new(RequestType::ServoForward, true, Vec::new());
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
                         payload: resp.to_payload(),
                     };
                     self.priority_queue.push_back(frame.encode());
                 }
-                RequestKind::FirmwareUpdate => {
+                RequestType::FirmwareUpdate => {
                     let mut data = Vec::with_capacity(4);
                     if request.data.len() >= 4 {
                         data.extend_from_slice(&request.data[..4]); // offset
                     }
-                    let resp = Response::new(RequestKind::FirmwareUpdate, true, data);
+                    let resp = Response::new(RequestType::FirmwareUpdate, true, data);
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
                         payload: resp.to_payload(),

@@ -16,7 +16,7 @@ use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::{LogLevel, LogMessage};
 use crate::protocol::power::PowerData;
-use crate::protocol::request::RequestKind;
+use crate::protocol::request::RequestType;
 use crate::protocol::response::Response;
 use crate::protocol::servo::ServoCmdWrapper;
 
@@ -111,42 +111,41 @@ pub trait DriverCallback: Send + 'static {
 
     /// 统一应答回调（默认实现自动分解到具体 on_ack_* 回调）
     ///
-    /// 每个 Response 都会调用此回调。默认实现根据 `request_kind` 解析数据
+    /// 每个 Response 都会调用此回调。默认实现根据 `request_type` 解析数据
     /// 并调用对应的具体回调。覆盖此方法可接管全部应答处理逻辑。
     fn on_response(&mut self, response: &Response) {
-        match response.request_kind {
-            RequestKind::DeviceInfo => {
-                if response.success {
-                    if let Ok(info) = DeviceInfo::from_bytes(&response.data) {
-                        self.on_ack_device_info(&info);
-                    }
+        match response.request_type {
+            // 数据型应答:成功且可解析才交付具体回调,否则一律走 on_ack_failed
+            // (NACK 或数据损坏都不应静默,否则上层无法区分"查询被拒"与"没收到")
+            RequestType::DeviceInfo => {
+                match (response.success, DeviceInfo::from_bytes(&response.data)) {
+                    (true, Ok(info)) => self.on_ack_device_info(&info),
+                    _ => self.on_ack_failed(response),
                 }
             }
-            RequestKind::ConfigWrite => {
+            RequestType::ConfigQuery => {
+                match (response.success, Config::from_bytes(&response.data)) {
+                    (true, Ok(config)) => self.on_ack_cfg_query(&config),
+                    _ => self.on_ack_failed(response),
+                }
+            }
+            RequestType::ConfigQueryAll => {
+                match (response.success, BoardConfigSnapshot::from_bytes(&response.data)) {
+                    (true, Ok(snapshot)) => self.on_ack_cfg_query_all(&snapshot),
+                    _ => self.on_ack_failed(response),
+                }
+            }
+            RequestType::ConfigWrite => {
                 self.on_ack_cfg_write(response.success);
             }
-            RequestKind::ConfigQuery => {
-                if response.success {
-                    if let Ok(config) = Config::from_bytes(&response.data) {
-                        self.on_ack_cfg_query(&config);
-                    }
-                }
-            }
-            RequestKind::ConfigQueryAll => {
-                if response.success {
-                    if let Ok(snapshot) = BoardConfigSnapshot::from_bytes(&response.data) {
-                        self.on_ack_cfg_query_all(&snapshot);
-                    }
-                }
-            }
-            RequestKind::ServoForward => {
+            RequestType::ServoForward => {
                 let cmd = ServoCmdWrapper::new(response.data.clone());
                 self.on_ack_servo_cmd(&cmd);
             }
-            RequestKind::Reset | RequestKind::Shutdown | RequestKind::Ota => {
+            RequestType::Reset | RequestType::Shutdown | RequestType::Ota => {
                 self.on_ack_command(response.success);
             }
-            RequestKind::FirmwareUpdate => {
+            RequestType::FirmwareUpdate => {
                 let offset = if response.data.len() >= 4 {
                     u32::from_le_bytes([
                         response.data[0],
@@ -162,7 +161,7 @@ pub trait DriverCallback: Send + 'static {
         }
     }
 
-    // ═══ 具体应答回调（dispatch 层根据 request_kind 自动分发）═══
+    // ═══ 具体应答回调（dispatch 层根据 request_type 自动分发）═══
 
     /// 设备信息应答（DeviceInfo 查询响应）
     fn on_ack_device_info(&mut self, _info: &DeviceInfo) {}
@@ -185,5 +184,63 @@ pub trait DriverCallback: Send + 'static {
     /// 固件更新确认
     fn on_ack_firmware_update(&mut self, _success: bool, _offset: u32) {}
 
+    /// 数据型应答失败通知（DeviceInfo / ConfigQuery / ConfigQueryAll）
+    ///
+    /// 应答为 `success=false`(板子 NACK)或数据无法解析时调用;此类应答没有
+    /// 可交付的数据,因此不会调用对应的 `on_ack_*` 具体回调。覆盖此方法可
+    /// 区分"查询被拒"与"根本没收到应答"(后者表现为无任何回调)。
+    fn on_ack_failed(&mut self, _response: &Response) {}
+
     fn on_error(&mut self, _error: &DriverError) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::config::Config;
+    use crate::protocol::request::RequestType;
+
+    struct Cb {
+        failed: Vec<RequestType>,
+        cfg_query_called: bool,
+    }
+
+    impl DriverCallback for Cb {
+        fn on_ack_failed(&mut self, response: &Response) {
+            self.failed.push(response.request_type);
+        }
+        fn on_ack_cfg_query(&mut self, _config: &Config) {
+            self.cfg_query_called = true;
+        }
+    }
+
+    /// 数据型应答失败(NACK / 数据损坏)必须走 on_ack_failed,
+    /// 不能静默也不调用具体回调。
+    #[test]
+    fn test_on_response_failure_invokes_on_ack_failed() {
+        let mut cb = Cb {
+            failed: Vec::new(),
+            cfg_query_called: false,
+        };
+
+        // NACK:无数据可交付 → on_ack_failed
+        cb.on_response(&Response::simple(RequestType::ConfigQuery, false));
+        assert_eq!(cb.failed, vec![RequestType::ConfigQuery]);
+        assert!(!cb.cfg_query_called);
+
+        // success 但数据无法解析 → on_ack_failed
+        cb.on_response(&Response::new(RequestType::ConfigQuery, true, vec![0x99, 0x99]));
+        assert_eq!(cb.failed.len(), 2);
+        assert!(!cb.cfg_query_called);
+
+        // 成功且可解析 → 具体回调,不触发 on_ack_failed
+        let config = Config::ChargeStopSoc(80);
+        cb.on_response(&Response::new(
+            RequestType::ConfigQuery,
+            true,
+            config.to_bytes(),
+        ));
+        assert_eq!(cb.failed.len(), 2, "success path must not fire on_ack_failed");
+        assert!(cb.cfg_query_called);
+    }
 }

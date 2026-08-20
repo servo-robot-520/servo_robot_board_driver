@@ -53,7 +53,18 @@ struct StateInner {
     pub last_frame_time: Option<Instant>,
 }
 
+impl Default for DriverState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DriverState {
+    /// 获取内部状态;锁中毒时恢复(读取方不应因其他线程的一次 panic 连带 panic)
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, StateInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn new() -> Self {
         DriverState {
             inner: Mutex::new(StateInner {
@@ -96,62 +107,62 @@ impl DriverState {
 
     /// 单独获取某项数据
     pub fn imu(&self) -> Option<ImuData> {
-        self.inner.lock().unwrap().imu.clone()
+        self.lock_inner().imu.clone()
     }
 
     pub fn power(&self) -> Option<PowerData> {
-        self.inner.lock().unwrap().power.clone()
+        self.lock_inner().power.clone()
     }
 
     /// 获取诊断数据快照（运行时 CPU/内存/温度等）
     pub fn diagnostic(&self) -> Option<Diagnostic> {
-        self.inner.lock().unwrap().diagnostic.clone()
+        self.lock_inner().diagnostic.clone()
     }
 
     pub fn battery(&self) -> Option<BatteryState> {
-        self.inner.lock().unwrap().battery.clone()
+        self.lock_inner().battery.clone()
     }
 
     pub fn config(&self) -> Option<BoardConfigSnapshot> {
-        self.inner.lock().unwrap().config.clone()
+        self.lock_inner().config.clone()
     }
 
     pub fn event(&self) -> Option<BoardEvent> {
-        self.inner.lock().unwrap().event.clone()
+        self.lock_inner().event.clone()
     }
 
     pub fn device_info(&self) -> Option<DeviceInfo> {
-        self.inner.lock().unwrap().device_info.clone()
+        self.lock_inner().device_info.clone()
     }
 
     /// 获取最新一条日志
     pub fn log(&self) -> Option<LogEntry> {
-        self.inner.lock().unwrap().logs.back().cloned()
+        self.lock_inner().logs.back().cloned()
     }
 
     /// 获取所有日志（用于快照）
     pub fn logs(&self) -> VecDeque<LogEntry> {
-        self.inner.lock().unwrap().logs.clone()
+        self.lock_inner().logs.clone()
     }
 
     pub fn last_error(&self) -> Option<DriverError> {
-        self.inner.lock().unwrap().last_error.clone()
+        self.lock_inner().last_error.clone()
     }
 
     pub fn is_connected(&self) -> bool {
-        self.inner.lock().unwrap().connected
+        self.lock_inner().connected
     }
 
     pub fn frame_count(&self) -> u64 {
-        self.inner.lock().unwrap().frame_count
+        self.lock_inner().frame_count
     }
 
     pub fn frames_parsed(&self) -> u64 {
-        self.inner.lock().unwrap().frames_parsed
+        self.lock_inner().frames_parsed
     }
 
     pub fn frames_dropped(&self) -> u64 {
-        self.inner.lock().unwrap().frames_dropped
+        self.lock_inner().frames_dropped
     }
 
     /// 成功解析帧计数
@@ -219,11 +230,11 @@ impl DriverState {
     }
 
     pub(crate) fn set_connected(&self, connected: bool) {
-        self.inner.lock().unwrap().connected = connected;
+        self.lock_inner().connected = connected;
     }
 
     pub(crate) fn set_error(&self, error: DriverError) {
-        self.inner.lock().unwrap().last_error = Some(error);
+        self.lock_inner().last_error = Some(error);
     }
 }
 

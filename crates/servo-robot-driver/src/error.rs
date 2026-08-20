@@ -34,14 +34,11 @@ pub enum DriverError {
     #[error("Timeout waiting for response")]
     Timeout,
 
-    #[error("CRC mismatch: expected {expected:#06x}, got {got:#06x}")]
-    CrcMismatch { expected: u16, got: u16 },
-
     #[error("Payload too short: expected {expected} bytes, got {got}")]
     PayloadTooShort { expected: usize, got: usize },
 
-    #[error("Unknown frame type: {0:#04x}")]
-    UnknownFrameType(u8),
+    #[error("Payload too large: max {max} bytes, got {got}")]
+    PayloadTooLarge { max: usize, got: usize },
 
     #[error("Driver not running")]
     NotRunning,

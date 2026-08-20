@@ -323,7 +323,7 @@ typedef struct {
     void (*on_diagnostic)(void* userdata, const sr_diagnostic* diag);
     void (*on_log)(void* userdata, const sr_log_message* msg);
     /// 具体应答回调（驱动内部分解 Response 后自动调用）
-    void (*on_device_info)(void* userdata, const sr_device_info* info);
+    void (*on_ack_device_info)(void* userdata, const sr_device_info* info);
     void (*on_ack_cfg_write)(void* userdata, uint8_t success);
     void (*on_ack_cfg_query)(void* userdata, const sr_config* config);
     void (*on_ack_cfg_query_all)(void* userdata, const sr_board_config* config);
@@ -331,6 +331,9 @@ typedef struct {
     void (*on_ack_command)(void* userdata, uint8_t success);
     void (*on_ack_firmware_update)(void* userdata, uint8_t success, uint32_t offset);
     void (*on_error)(void* userdata, int error_code);
+    /// 数据型应答失败(DeviceInfo/ConfigQuery/ConfigQueryAll 被拒或数据无法解析;
+    /// request_type 为对应 SR_CMD/SR_CONFIG 类型;此时不会调用对应 on_ack_* 具体回调)
+    void (*on_ack_failed)(void* userdata, uint8_t request_type);
 } sr_callbacks;
 
 /*  生命周期  */

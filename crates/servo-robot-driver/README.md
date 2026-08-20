@@ -244,7 +244,7 @@ impl DriverCallback for MyCallback {
             diag.cpu_usage_percent, diag.uptime_s, diag.temp_mcu as f32 / 10.0);
     }
 
-    fn on_device_info(&mut self, info: &DeviceInfo) {
+    fn on_ack_device_info(&mut self, info: &DeviceInfo) {
         println!("Device: id={:#06x} FW={} RAM={}KB",
             info.device_id, info.firmware_version, info.ram_kb);
     }
@@ -408,6 +408,7 @@ gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
 | `on_ack_servo_cmd` | 舵机命令响应 |
 | `on_ack_command` | 系统命令确认（Reset/Shutdown/Ota）|
 | `on_ack_firmware_update` | 固件更新确认 |
+| `on_ack_failed` | 数据型应答失败（DeviceInfo/ConfigQuery/ConfigQueryAll 被拒或数据无法解析；此时不触发对应 `on_ack_*` 具体回调）|
 | `on_log` | 板级日志 |
 | `on_error` | 错误通知 |
 
@@ -417,3 +418,4 @@ gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
 - 回调参数指针仅在回调执行期间有效，不要跨调用保存
 - 禁止在其他线程仍使用句柄时调用 `sr_driver_free`（use-after-free）
 - 同步函数阻塞 ≤1s（驱动默认超时）
+- 同步请求-响应（`*_sync`）在驱动内部**串行执行**：同一时刻只有一个同步调用在等待应答，多线程并发 `*_sync` 会排队（各阻塞 ≤1s）。每次同步调用前会排空历史遗留应答（超时迟到 ACK、fire-and-forget 发送的应答），避免陈旧应答污染下一次等待
