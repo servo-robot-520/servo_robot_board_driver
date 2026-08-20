@@ -84,6 +84,12 @@ impl AsyncDriver {
         self.call(|d| d.stop()).await
     }
 
+    /// 重新连接到指定串口
+    pub async fn connect(&self, port: &str, baud_rate: u32) -> Result<(), DriverError> {
+        let port = port.to_owned();
+        self.call(move |d| d.connect(&port, baud_rate)).await
+    }
+
     /// 写入配置到 STM32(不等待应答)
     pub async fn write_config(&self, config: Config) -> Result<(), DriverError> {
         self.call(move |d| d.write_config(config)).await

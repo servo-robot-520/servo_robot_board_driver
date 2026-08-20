@@ -158,6 +158,41 @@ impl Driver {
         Ok(())
     }
 
+    /// 重新连接到指定串口
+    ///
+    /// 如果驱动正在运行，会先停止当前连接，替换传输层，再重新启动。
+    /// 适用于上层自行实现重连逻辑的场景（如 FFI 调用方）。
+    ///
+    /// # Arguments
+    /// * `port` - 串口设备路径
+    /// * `baud_rate` - 波特率
+    pub fn connect(&mut self, port: &str, baud_rate: u32) -> Result<(), DriverError> {
+        let was_running = self.running.load(Ordering::Relaxed);
+
+        // 停止当前连接
+        if was_running {
+            self.stop()?;
+        }
+
+        // 替换传输层
+        let transport = crate::transport::serial::SerialTransport::open(port, baud_rate)
+            .map_err(|e| DriverError::Serial(e.to_string()))?;
+        {
+            let mut guard = self
+                .transport
+                .lock()
+                .map_err(|_| DriverError::LockPoisoned)?;
+            *guard = Some(Box::new(transport));
+        }
+
+        // 重新启动
+        if was_running {
+            self.start()?;
+        }
+
+        Ok(())
+    }
+
     // ═══ 写入/查询（不等待应答）═══
 
     /// 写入配置到 STM32（不等待应答）

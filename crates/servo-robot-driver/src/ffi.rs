@@ -12,12 +12,9 @@ pub mod callback;
 
 use crate::driver::Driver;
 use crate::error::DriverError;
-use crate::protocol::command::{Command, CommandType};
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
-use crate::protocol::servo::ServoCmdWrapper;
-use crate::reconnect::ReconnectConfig;
+use crate::transport::Transport;
 use crate::transport::serial::SerialTransport;
-use crate::transport::{FnTransportFactory, Transport};
 use callback::{CallbackTable, CffiCallback, SrCallbacks};
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -299,6 +296,27 @@ fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
     }
 }
 
+/// 驱动版本号（与 Cargo.toml version 一致）
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SrVersion {
+    pub major: u16,
+    pub minor: u16,
+    pub patch: u16,
+}
+
+/// 获取驱动版本号
+///
+/// @return 版本结构体，始终成功
+#[unsafe(no_mangle)]
+pub extern "C" fn sr_driver_version() -> SrVersion {
+    SrVersion {
+        major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap_or(0),
+        minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap_or(0),
+        patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap_or(0),
+    }
+}
+
 /// 打开串口并创建驱动句柄;失败返回 NULL,错误描述写入 err_buf
 #[unsafe(no_mangle)]
 pub extern "C" fn sr_driver_open(
@@ -330,48 +348,41 @@ pub extern "C" fn sr_driver_open(
     }
 }
 
-/// 打开串口并创建支持自动重连的驱动句柄
+/// 重新连接到指定串口（上层实现重连逻辑时使用）
+///
+/// 如果驱动正在运行，会先停止当前连接，打开新串口，再重新启动。
+/// 失败时返回错误码，驱动状态不变。
+///
+/// @param d         驱动句柄
+/// @param port      新的串口设备路径
+/// @param baud_rate 波特率
+/// @return SR_OK 成功;其他见 sr_error_code
 #[unsafe(no_mangle)]
-pub extern "C" fn sr_driver_open_reconnect(
-    port: *const c_char,
-    baud_rate: u32,
-    max_retries: u32,
-    retry_interval_ms: u32,
-    backoff_multiplier: f32,
-    max_retry_interval_ms: u32,
-    err_buf: *mut c_char,
-    err_buf_len: usize,
-) -> *mut SrDriver {
-    let res = catch_unwind(AssertUnwindSafe(|| -> Result<*mut SrDriver, String> {
-        if port.is_null() {
-            return Err("port is NULL".to_string());
-        }
-        if !backoff_multiplier.is_finite() || backoff_multiplier < 0.0 {
-            return Err("backoff_multiplier must be finite and >= 0".to_string());
-        }
+pub extern "C" fn sr_driver_connect(d: *mut SrDriver, port: *const c_char, baud_rate: u32) -> i32 {
+    if d.is_null() {
+        return SR_ERR_NULL;
+    }
+    if port.is_null() {
+        return SR_ERR_NULL;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let driver = unsafe { &*d };
+        let mut inner = driver.inner.lock().map_err(|_| DriverError::LockPoisoned)?;
         let port_name = unsafe { CStr::from_ptr(port) }
             .to_string_lossy()
             .into_owned();
-        let factory = FnTransportFactory::new(move || {
-            SerialTransport::open(&port_name, baud_rate).map(|t| Box::new(t) as Box<dyn Transport>)
-        });
-        let config = ReconnectConfig {
-            max_retries,
-            retry_interval: Duration::from_millis(retry_interval_ms as u64),
-            backoff_multiplier,
-            max_retry_interval: Duration::from_millis(max_retry_interval_ms as u64),
-        };
-        Ok(build_sr_driver(Driver::new_with_reconnect(factory, config)))
+        inner.connect(&port_name, baud_rate)
     }));
-    match res {
-        Ok(Ok(d)) => d,
-        Ok(Err(msg)) => {
-            write_err_buf(err_buf, err_buf_len, &msg);
-            ptr::null_mut()
+    match result {
+        Ok(Ok(())) => SR_OK,
+        Ok(Err(e)) => {
+            let code = err_code(&e);
+            let _ = set_last_error(unsafe { &mut *d }, &e.to_string());
+            code
         }
         Err(_) => {
-            write_err_buf(err_buf, err_buf_len, "panic in sr_driver_open_reconnect");
-            ptr::null_mut()
+            let _ = set_last_error(unsafe { &mut *d }, "panic in sr_driver_connect");
+            SR_ERR_PANIC
         }
     }
 }
@@ -730,37 +741,20 @@ mod tests {
     }
 
     #[test]
-    fn test_open_reconnect_invalid_backoff() {
-        let mut err_buf = [0 as c_char; 64];
-        // 负退避因子:构造期拒绝,避免重连线程 panic
-        let d = sr_driver_open_reconnect(
-            b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
-            115200,
-            3,
-            10,
-            -1.0,
-            100,
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
+    fn test_connect_null_args() {
+        let d = boxed_ptr();
+        // NULL driver
+        assert_eq!(
+            sr_driver_connect(
+                ptr::null_mut(),
+                b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
+                115200
+            ),
+            SR_ERR_NULL
         );
-        assert!(d.is_null());
-        assert!(
-            !unsafe { CStr::from_ptr(err_buf.as_ptr()) }
-                .to_string_lossy()
-                .is_empty()
-        );
-        // NaN 同样拒绝
-        let d = sr_driver_open_reconnect(
-            b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
-            115200,
-            3,
-            10,
-            f32::NAN,
-            100,
-            err_buf.as_mut_ptr(),
-            err_buf.len(),
-        );
-        assert!(d.is_null());
+        // NULL port
+        assert_eq!(sr_driver_connect(d, ptr::null(), 115200), SR_ERR_NULL);
+        sr_driver_free(d);
     }
 
     #[test]

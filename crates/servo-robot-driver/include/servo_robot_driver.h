@@ -342,6 +342,16 @@ typedef struct {
 
 /*  生命周期  */
 
+/// 驱动版本号
+typedef struct {
+    uint16_t major;
+    uint16_t minor;
+    uint16_t patch;
+} sr_version;
+
+/// 获取驱动版本号(始终成功,无需句柄)
+sr_version sr_driver_version(void);
+
 /// 打开串口并创建驱动句柄(不支持自动重连)。
 ///
 /// @param port        串口设备路径,如 "/dev/ttyUSB0"、"/dev/ttyS0"(Windows: "COM3")
@@ -352,23 +362,16 @@ typedef struct {
 sr_driver* sr_driver_open(const char* port, uint32_t baud_rate,
                           char* err_buf, size_t err_buf_len);
 
-/// 打开串口并创建支持自动重连的驱动句柄。
+/// 重新连接到指定串口(上层实现重连逻辑时使用)。
 ///
-/// 断开后驱动按指数退避自动重连:第 n 次重试前等待
-/// retry_interval_ms × backoff_multiplier^n(上限 max_retry_interval_ms)。
+/// 如果驱动正在运行,会先停止当前连接,打开新串口,再重新启动。
+/// 失败时返回错误码,驱动状态不变。
 ///
-/// @param port                串口设备路径
-/// @param baud_rate           波特率
-/// @param max_retries         最大重试次数(0 = 不重连)
-/// @param retry_interval_ms   首次重试等待(ms)
-/// @param backoff_multiplier  退避倍数(须为有限非负数,非法返回 NULL)
-/// @param max_retry_interval_ms 重试等待上限(ms)
-/// @param err_buf / err_buf_len 同 sr_driver_open
-/// @return 驱动句柄;失败返回 NULL,err_buf 含错误描述
-sr_driver* sr_driver_open_reconnect(const char* port, uint32_t baud_rate,
-                                    uint32_t max_retries, uint32_t retry_interval_ms,
-                                    float backoff_multiplier, uint32_t max_retry_interval_ms,
-                                    char* err_buf, size_t err_buf_len);
+/// @param d         驱动句柄
+/// @param port      新的串口设备路径
+/// @param baud_rate 波特率
+/// @return SR_OK 成功;其他见 sr_error_code
+int sr_driver_connect(sr_driver* d, const char* port, uint32_t baud_rate);
 
 /// 释放句柄(内部 stop 并 join 读/分发线程)。NULL 安全。
 ///
