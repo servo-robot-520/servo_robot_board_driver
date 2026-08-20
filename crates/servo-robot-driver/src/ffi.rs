@@ -13,6 +13,7 @@ pub mod callback;
 use crate::driver::Driver;
 use crate::error::DriverError;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
+use crate::protocol::device_info::DeviceInfo;
 use crate::protocol::request::RequestKind;
 use crate::protocol::servo::ServoCmdWrapper;
 use crate::transport::serial::SerialTransport;
@@ -282,7 +283,7 @@ fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
     }
 }
 
-fn to_sr_device_info(d: DeviceInfo) -> SrDeviceInfo {
+fn to_sr_device_info(info: &DeviceInfo) -> SrDeviceInfo {
     SrDeviceInfo {
         device_id: info.device_id,
         uid: info.uid,
@@ -497,7 +498,7 @@ pub extern "C" fn sr_driver_query_device_info(d: *mut SrDriver, out: *mut SrDevi
     guard(d, |d| {
         let info = d.query_device_info_sync()?;
         unsafe {
-            *out = to_sr_device_info(info);
+            *out = to_sr_device_info(&info);
         }
         Ok(())
     })

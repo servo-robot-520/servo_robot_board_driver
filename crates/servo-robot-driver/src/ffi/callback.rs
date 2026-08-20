@@ -37,7 +37,7 @@ pub struct SrCallbacks {
     pub on_diagnostic: Option<extern "C" fn(*mut c_void, *const SrDiagnostic)>,
     pub on_log: Option<extern "C" fn(*mut c_void, *const SrLogMessage)>,
     // 具体应答回调（on_response 默认实现自动分解后调用）
-    pub on_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
+    pub on_ack_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
     pub on_ack_cfg_write: Option<extern "C" fn(*mut c_void, u8)>,
     pub on_ack_cfg_query: Option<extern "C" fn(*mut c_void, *const SrConfig)>,
     pub on_ack_cfg_query_all: Option<extern "C" fn(*mut c_void, *const SrBoardConfig)>,
@@ -214,7 +214,7 @@ impl DriverCallback for CffiCallback {
     }
 
     fn on_ack_device_info(&mut self, info: &DeviceInfo) {
-        let sr = super::to_sr_device_info(*info);
+        let sr = super::to_sr_device_info(info);
         self.with_table(|cb| {
             if let Some(f) = cb.on_device_info {
                 f(cb.userdata, &sr)
