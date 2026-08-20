@@ -60,15 +60,18 @@ pub enum ChargePhase {
 }
 
 impl ChargePhase {
+    /// 线值 = 枚举判别值(0~6),与 `to_bytes`(`charge_phase as u8`)和头文件
+    /// `sr_charge_phase` 严格一致。曾有一版 +1 错位映射,会导致
+    /// `BoardEvent::to_bytes → from_bytes` 往返失败(见测试)。
     pub fn from_u8(v: u8) -> Self {
         match v {
-            1 => Self::NotCharging,
-            2 => Self::PreCharge,
-            3 => Self::Cc,
-            4 => Self::Cv,
-            5 => Self::Full,
-            6 => Self::PdSinkFault,
-            7 => Self::UnsupportedCharger,
+            0 => Self::NotCharging,
+            1 => Self::PreCharge,
+            2 => Self::Cc,
+            3 => Self::Cv,
+            4 => Self::Full,
+            5 => Self::PdSinkFault,
+            6 => Self::UnsupportedCharger,
             _ => Self::NotCharging,
         }
     }
@@ -451,5 +454,64 @@ impl core::fmt::Display for BoardEvent {
             self.protection_flags.bits(),
             self.error_flags.bits()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ChargePhase 线值必须 = 枚举判别值:全相位 to_bytes → from_bytes 往返一致
+    #[test]
+    fn test_charge_phase_roundtrip() {
+        let phases = [
+            ChargePhase::NotCharging,
+            ChargePhase::PreCharge,
+            ChargePhase::Cc,
+            ChargePhase::Cv,
+            ChargePhase::Full,
+            ChargePhase::PdSinkFault,
+            ChargePhase::UnsupportedCharger,
+        ];
+        for p in phases {
+            let e = BoardEvent {
+                charge_phase: p,
+                state_change_flags: StateChangeFlags::empty(),
+                protection_flags: ProtectionFlags::empty(),
+                error_flags: ErrorFlags::empty(),
+            };
+            let decoded = BoardEvent::from_bytes(&e.to_bytes()).unwrap();
+            assert_eq!(decoded.charge_phase, p, "roundtrip failed for {:?}", p);
+        }
+    }
+
+    /// from_u8 与判别值/头文件 sr_charge_phase(0~6) 一致
+    #[test]
+    fn test_charge_phase_wire_values() {
+        assert_eq!(ChargePhase::NotCharging as u8, 0);
+        assert_eq!(ChargePhase::from_u8(0), ChargePhase::NotCharging);
+        assert_eq!(ChargePhase::from_u8(2), ChargePhase::Cc);
+        assert_eq!(ChargePhase::from_u8(4), ChargePhase::Full);
+        assert_eq!(ChargePhase::from_u8(6), ChargePhase::UnsupportedCharger);
+        assert_eq!(ChargePhase::from_u8(0xFF), ChargePhase::NotCharging); // 未知 → NotCharging
+    }
+
+    /// BoardEvent 7 字节帧格式 + 位标志往返
+    #[test]
+    fn test_board_event_encode_decode() {
+        let e = BoardEvent {
+            charge_phase: ChargePhase::Cv,
+            state_change_flags: StateChangeFlags::CHARGER_CONNECTED | StateChangeFlags::FAN_ENABLED,
+            protection_flags: ProtectionFlags::BATTERY_LOW,
+            error_flags: ErrorFlags::UART1_ERROR,
+        };
+        let bytes = e.to_bytes();
+        assert_eq!(bytes.len(), 7);
+        assert_eq!(bytes[0], ChargePhase::Cv as u8);
+        let decoded = BoardEvent::from_bytes(&bytes).unwrap();
+        assert_eq!(decoded.charge_phase, ChargePhase::Cv);
+        assert_eq!(decoded.state_change_flags, e.state_change_flags);
+        assert_eq!(decoded.protection_flags, e.protection_flags);
+        assert_eq!(decoded.error_flags, e.error_flags);
     }
 }

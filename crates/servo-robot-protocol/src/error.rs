@@ -18,6 +18,8 @@ pub enum FrameError {
     PayloadDecode(&'static str),
     /// Payload 长度不足
     PayloadTooShort { expected: usize, got: usize },
+    /// Payload 超过协议上限(255B)
+    PayloadTooLarge { max: usize, got: usize },
 }
 
 impl core::fmt::Display for FrameError {
@@ -40,6 +42,13 @@ impl core::fmt::Display for FrameError {
                     f,
                     "Payload too short: expected {} bytes, got {}",
                     expected, got
+                )
+            }
+            Self::PayloadTooLarge { max, got } => {
+                write!(
+                    f,
+                    "Payload too large: max {} bytes, got {}",
+                    max, got
                 )
             }
         }

@@ -25,6 +25,9 @@ pub const FRAME_HEAD: u8 = 0xAA;
 const FRAME_HEADER_SIZE: usize = 4;
 /// CRC 长度
 const FRAME_CRC_SIZE: usize = 2;
+/// Payload 协议上限(协议文档约定 0~255B;LEN 虽是 u16,超限帧一律拒绝,
+/// 同时限制 decode 侧的单帧分配)
+pub const MAX_PAYLOAD_SIZE: usize = 255;
 
 /// 帧类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +154,15 @@ impl RawFrame {
 
         let frame_type = FrameType::from_u8(buf[header_pos + 1]);
         let payload_len = u16::from_le_bytes([buf[header_pos + 2], buf[header_pos + 3]]) as usize;
+
+        // 拒绝超限帧(协议上限 255B):损坏/恶意流不能触发大分配
+        if payload_len > MAX_PAYLOAD_SIZE {
+            return Err(FrameError::PayloadTooLarge {
+                max: MAX_PAYLOAD_SIZE,
+                got: payload_len,
+            });
+        }
+
         let total_len = FRAME_HEADER_SIZE + payload_len + FRAME_CRC_SIZE;
 
         if buf.len() - header_pos < total_len {
@@ -366,5 +378,17 @@ mod tests {
         assert_eq!(consumed, encoded.len());
         assert_eq!(decoded.frame_type, frame.frame_type);
         assert_eq!(decoded.payload, frame.payload);
+    }
+
+    /// LEN 超协议上限(255B)的帧必须被拒绝,不能触发大分配
+    #[test]
+    fn test_decode_rejects_oversized_payload() {
+        let mut frame = vec![FRAME_HEAD, FrameType::Imu.as_u8(), 0x2C, 0x01]; // LEN=300 LE
+        frame.extend_from_slice(&[0u8; 300]);
+        frame.extend_from_slice(&[0, 0]);
+        assert!(matches!(
+            RawFrame::decode(&frame),
+            Err(FrameError::PayloadTooLarge { max: 255, got: 300 })
+        ));
     }
 }

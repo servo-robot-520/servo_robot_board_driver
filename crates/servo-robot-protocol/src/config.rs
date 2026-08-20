@@ -85,8 +85,8 @@ impl ConfigType {
         }
     }
 
-    /// Get the value payload size in bytes (excluding type byte)
-    /// None means no value payload (Reset/Shutdown)
+    /// 值 payload 大小(不含 type 字节)。当前所有 ConfigType 都有值 payload,
+    /// 保留 `Option` 以便未来加入无值命令(Reset/Shutdown 类)。
     pub fn value_size(&self) -> Option<usize> {
         match self {
             // Switches: 1 byte (bool)

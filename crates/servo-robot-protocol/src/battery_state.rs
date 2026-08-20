@@ -167,6 +167,13 @@ impl BatteryState {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
+        // 线格式成对编码电压/温度,两数组必须等长;不一致属于构造错误
+        // (zip 会静默截断),debug 构建直接暴露。
+        debug_assert_eq!(
+            self.cell_voltages_mv.len(),
+            self.cell_temperatures.len(),
+            "cell_voltages_mv and cell_temperatures must be equal length"
+        );
         let cell_count = self.cell_voltages_mv.len();
         let mut buf = Vec::with_capacity(20 + cell_count * 4);
         buf.extend_from_slice(&self.voltage_mv.to_le_bytes());

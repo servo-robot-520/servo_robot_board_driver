@@ -24,12 +24,15 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
+    /// 线值 = 枚举判别值(0~4)。曾缺 `4 => Error` 分支,板级 ERROR 日志
+    /// 会被解码成 `OFF` 并降级为 info 输出。
     pub fn from_u8(v: u8) -> Self {
         match v {
             0 => LogLevel::OFF,
             1 => LogLevel::Debug,
             2 => LogLevel::Info,
             3 => LogLevel::Warn,
+            4 => LogLevel::Error,
             _ => Self::OFF,
         }
     }
@@ -196,5 +199,31 @@ mod tests {
         assert_eq!(log.file_name, "");
         assert_eq!(log.fun_name, "");
         assert_eq!(log.msg, "");
+    }
+
+    /// Error=4 必须解码为 Error(曾落进 `_ => OFF`,板级 ERROR 日志被降级)
+    #[test]
+    fn test_log_level_error_roundtrip() {
+        assert_eq!(LogLevel::from_u8(4), LogLevel::Error);
+        let log = LogMessage {
+            level: LogLevel::Error,
+            file_name: "imu.c".into(),
+            fun_name: "read".into(),
+            msg: "bus fault".into(),
+        };
+        let decoded = LogMessage::from_bytes(&log.to_bytes()).unwrap();
+        assert_eq!(decoded.level, LogLevel::Error);
+        assert_eq!(decoded.msg, "bus fault");
+    }
+
+    /// 全部线值映射
+    #[test]
+    fn test_log_level_from_u8_all() {
+        assert_eq!(LogLevel::from_u8(0), LogLevel::OFF);
+        assert_eq!(LogLevel::from_u8(1), LogLevel::Debug);
+        assert_eq!(LogLevel::from_u8(2), LogLevel::Info);
+        assert_eq!(LogLevel::from_u8(3), LogLevel::Warn);
+        assert_eq!(LogLevel::from_u8(4), LogLevel::Error);
+        assert_eq!(LogLevel::from_u8(5), LogLevel::OFF); // 未知 → OFF
     }
 }
