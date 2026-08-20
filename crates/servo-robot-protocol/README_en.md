@@ -58,14 +58,14 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 | Diagnostic | 0x06 | Uplink | Runtime diagnostics (CPU, memory, errors, temperatures) |
 | Event | 0x07 | Uplink | Event |
 | Log | 0x08 | Uplink | Log message |
-| Request | 0x80 | Downlink | Unified request (see RequestKind) |
-| Response | 0xC0 | Response | Unified response (see RequestKind) |
+| Request | 0x80 | Downlink | Unified request (see RequestType) |
+| Response | 0xC0 | Response | Unified response (see RequestType) |
 
-### RequestKind
+### RequestType
 
 All downlink operations are unified into a single `Request (0x80)` frame; the first byte of the payload (`RequestType`) identifies the specific operation.
 
-| RequestKind | Value | Description | Expects Response |
+| RequestType | Value | Description | Expects Response |
 |-------------|-------|-------------|-----------------|
 | Reset | 0x01 | Reboot MCU | No (fire-and-forget) |
 | Shutdown | 0x02 | Shutdown (cut all power) | No (fire-and-forget) |
@@ -162,7 +162,7 @@ Battery status information.
 
 ### DeviceInfo
 
-Device identity and memory layout (static hardware information). Does not change at runtime. Obtained via `RequestKind::DeviceInfo`.
+Device identity and memory layout (static hardware information). Does not change at runtime. Obtained via `RequestType::DeviceInfo`.
 
 ```rust
 pub struct Version {
@@ -418,10 +418,10 @@ match frame.frame_type {
 
 ```rust
 use servo_robot_protocol::frame::{RawFrame, FrameType};
-use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::request::{Request, RequestType};
 
 // Query device info
-let req = Request::new(RequestKind::DeviceInfo, vec![]);
+let req = Request::new(RequestType::DeviceInfo, vec![]);
 let frame = RawFrame {
     frame_type: FrameType::Request,
     payload: req.to_payload(),
@@ -433,18 +433,18 @@ let bytes = frame.encode(); // Includes HEAD + TYPE + LEN + PAYLOAD + CRC
 
 ```rust
 use servo_robot_protocol::response::Response;
-use servo_robot_protocol::request::RequestKind;
+use servo_robot_protocol::request::RequestType;
 use servo_robot_protocol::device_info::DeviceInfo;
 
 // Parse response
 let resp = Response::from_payload(&frame.payload)?;
 if resp.success {
     match resp.request_type {
-        RequestKind::DeviceInfo => {
+        RequestType::DeviceInfo => {
             let info = DeviceInfo::from_bytes(&resp.data)?;
             println!("Firmware: {}", info.firmware_version);
         }
-        RequestKind::ConfigQuery => { /* parse config value */ }
+        RequestType::ConfigQuery => { /* parse config value */ }
         _ => {}
     }
 }
@@ -453,14 +453,14 @@ if resp.success {
 ### Fire-and-Forget Commands
 
 ```rust
-use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::request::{Request, RequestType};
 
 // Reset MCU — no response expected
-let req = Request::new(RequestKind::Reset, vec![]);
+let req = Request::new(RequestType::Reset, vec![]);
 // Shutdown — no response expected
-let req = Request::new(RequestKind::Shutdown, vec![]);
+let req = Request::new(RequestType::Shutdown, vec![]);
 // Trigger OTA — no response expected
-let req = Request::new(RequestKind::Ota, vec![]);
+let req = Request::new(RequestType::Ota, vec![]);
 ```
 
 ### Typed Frame
@@ -483,14 +483,14 @@ match typed {
 
 ```rust
 use servo_robot_protocol::servo::ServoCmdWrapper;
-use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::request::{Request, RequestType};
 use servo_robot_protocol::frame::{RawFrame, FrameType};
 
 // Create servo command from raw bytes
 let cmd = ServoCmdWrapper::new(vec![0x01, 0x02, 0x03]);
 
 // Encode as Request frame
-let req = Request::new(RequestKind::ServoForward, cmd.to_payload());
+let req = Request::new(RequestType::ServoForward, cmd.to_payload());
 let frame = RawFrame {
     frame_type: FrameType::Request,
     payload: req.to_payload(),
@@ -543,7 +543,7 @@ src/
 ├── event.rs            # BoardEvent, EventLog, EventKind, EventCategory
 ├── log.rs              # LogMessage, LogLevel
 ├── config.rs           # ConfigType, Config, BoardConfigSnapshot
-├── request.rs          # RequestKind, Request
+├── request.rs          # RequestType, Request
 ├── response.rs         # Response
 └── servo.rs            # ServoCmdWrapper
 ```

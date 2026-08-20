@@ -99,13 +99,13 @@ driver.start()?;
 ### 发送命令
 
 ```rust
-use servo_robot_driver::protocol::request::RequestKind;
+use servo_robot_driver::protocol::request::RequestType;
 
 // fire-and-forget（不等待应答）
-driver.send_command(RequestKind::Reset)?;
+driver.send_command(RequestType::Reset)?;
 
 // 等待应答
-let success = driver.send_command_sync(RequestKind::Reset)?;
+let success = driver.send_command_sync(RequestType::Reset)?;
 
 // 查询设备信息
 let response = driver.query_device_info()?;

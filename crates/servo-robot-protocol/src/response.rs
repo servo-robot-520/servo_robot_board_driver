@@ -1,6 +1,6 @@
 //! 应答帧定义
 //!
-//! 所有应答统一为 Response 帧，payload 首字节为 RequestKind 表示应答哪个请求。
+//! 所有应答统一为 Response 帧，payload 首字节为 RequestType 表示应答哪个请求。
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};

@@ -99,13 +99,13 @@ driver.start()?;
 ### Sending Commands
 
 ```rust
-use servo_robot_driver::protocol::request::RequestKind;
+use servo_robot_driver::protocol::request::RequestType;
 
 // fire-and-forget (no response wait)
-driver.send_command(RequestKind::Reset)?;
+driver.send_command(RequestType::Reset)?;
 
 // wait for response
-let success = driver.send_command_sync(RequestKind::Reset)?;
+let success = driver.send_command_sync(RequestType::Reset)?;
 
 // query device info
 let response = driver.query_device_info()?;

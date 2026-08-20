@@ -65,19 +65,19 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 
 | 类型 | 值 | 说明 |
 |------|-----|------|
-| Request | 0x80 | 统一请求帧（由 RequestKind 区分具体操作）|
+| Request | 0x80 | 统一请求帧（由 RequestType 区分具体操作）|
 
 ### 应答帧（STM32 → PC）
 
 | 类型 | 值 | 说明 |
 |------|-----|------|
-| Response | 0xC0 | 统一应答帧（payload 首字节为 RequestKind）|
+| Response | 0xC0 | 统一应答帧（payload 首字节为 RequestType）|
 
-### RequestKind 子类型
+### RequestType 子类型
 
 所有下行操作统一使用 `Request (0x80)` 帧，通过 payload 首字节区分具体操作：
 
-| RequestKind | 值 | 是否需要应答 | 说明 |
+| RequestType | 值 | 是否需要应答 | 说明 |
 |-------------|-----|-------------|------|
 | Reset | 0x01 | ✗ | 重启 MCU（fire-and-forget）|
 | Shutdown | 0x02 | ✗ | 关机，切断全部电源（fire-and-forget）|
@@ -99,7 +99,7 @@ Wire format: HEAD(0xAA) + TYPE(0x80) + LEN + [request_type:1][data:N] + CRC
 
 | 字段 | 类型 | 说明 |
 |-------|------|-------------|
-| request_type | u8 | RequestKind 枚举值 |
+| request_type | u8 | RequestType 枚举值 |
 | data | [u8] | 操作附带数据（如配置值、舵机命令字节、固件块等）|
 
 ### Response 帧结构
@@ -110,7 +110,7 @@ Wire format: HEAD(0xAA) + TYPE(0xC0) + LEN + [request_type:1][success:1][data:N]
 
 | 字段 | 类型 | 说明 |
 |-------|------|-------------|
-| request_type | u8 | 对应的 RequestKind 值 |
+| request_type | u8 | 对应的 RequestType 值 |
 | success | u8 | 0=失败，非0=成功 |
 | data | [u8] | 应答附带数据（如 Config、BoardConfigSnapshot、DeviceInfo 等）|
 
@@ -144,8 +144,8 @@ Wire format: HEAD(0xAA) + TYPE(0xC0) + LEN + [request_type:1][success:1][data:N]
 
 | 类型 | 方向 | 说明 |
 |------|------|-------------|
-| `Request` | PC → STM32 | 统一请求帧（含 RequestKind + 附带数据）|
-| `Response` | STM32 → PC | 统一应答帧（含 RequestKind + success + 附带数据）|
+| `Request` | PC → STM32 | 统一请求帧（含 RequestType + 附带数据）|
+| `Response` | STM32 → PC | 统一应答帧（含 RequestType + success + 附带数据）|
 | `DeviceInfo` | 按需查询 | 设备标识与内存布局（通过 DeviceInfo 请求获取）|
 
 ### ImuData
@@ -195,7 +195,7 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 
 ### DeviceInfo
 
-设备标识与内存布局（静态信息）。payload 长度 20 字节。通过 `RequestKind::DeviceInfo` 按需查询，数据在运行期间不会变化。
+设备标识与内存布局（静态信息）。payload 长度 20 字节。通过 `RequestType::DeviceInfo` 按需查询，数据在运行期间不会变化。
 
 | 字段 | 类型 | 单位 | 说明 |
 |-------|------|------|-------------|
@@ -388,7 +388,7 @@ pub enum EventCategory {
 | ChargeStopVoltageMv | 0x36 | 充电停止电压 (mV) |
 | ServoBaudRate | 0x37 | 舵机通信波特率 (u32) |
 
-> **注意**：配置读写通过 `Request` 帧（`RequestKind::ConfigWrite` / `ConfigQuery` / `ConfigQueryAll`）进行，应答通过 `Response` 帧返回。
+> **注意**：配置读写通过 `Request` 帧（`RequestType::ConfigWrite` / `ConfigQuery` / `ConfigQueryAll`）进行，应答通过 `Response` 帧返回。
 
 ### BoardConfigSnapshot
 
@@ -456,11 +456,11 @@ match frame.frame_type {
 
 ```rust
 use servo_robot_protocol::frame::{RawFrame, FrameType};
-use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::request::{Request, RequestType};
 use servo_robot_protocol::response::Response;
 
 // 查询设备信息
-let req = Request::new(RequestKind::DeviceInfo, vec![]);
+let req = Request::new(RequestType::DeviceInfo, vec![]);
 let frame = RawFrame {
     frame_type: FrameType::Request,
     payload: req.to_payload(),
@@ -485,7 +485,7 @@ use servo_robot_protocol::config::Config;
 let config = Config::PowerServoCurrentLimitMa(5000); // 5000mA = 5A
 let frame = RawFrame {
     frame_type: FrameType::Request,
-    payload: Request::new(RequestKind::ConfigWrite, config.to_bytes()).to_payload(),
+    payload: Request::new(RequestType::ConfigWrite, config.to_bytes()).to_payload(),
 };
 let bytes = frame.encode(); // 包含 HEAD + TYPE + LEN + PAYLOAD + CRC
 ```
@@ -511,7 +511,7 @@ match typed {
 ```rust
 use servo_robot_protocol::servo::ServoCmdWrapper;
 use servo_robot_protocol::frame::{RawFrame, FrameType};
-use servo_robot_protocol::request::{Request, RequestKind};
+use servo_robot_protocol::request::{Request, RequestType};
 
 // 从原始字节创建舵机命令
 let cmd = ServoCmdWrapper::new(vec![0x01, 0x02, 0x03]);
@@ -519,7 +519,7 @@ let cmd = ServoCmdWrapper::new(vec![0x01, 0x02, 0x03]);
 // 编码为请求帧
 let frame = RawFrame {
     frame_type: FrameType::Request,
-    payload: Request::new(RequestKind::ServoForward, cmd.to_payload()).to_payload(),
+    payload: Request::new(RequestType::ServoForward, cmd.to_payload()).to_payload(),
 };
 let bytes = frame.encode();
 ```
@@ -569,7 +569,7 @@ src/
 ├── event.rs            # BoardEvent, EventLog, EventKind, EventCategory
 ├── log.rs              # LogMessage, LogLevel
 ├── config.rs           # ConfigType, Config, BoardConfigSnapshot
-├── request.rs          # RequestKind, Request（统一下行帧）
+├── request.rs          # RequestType, Request（统一下行帧）
 ├── response.rs         # Response（统一应答帧）
 └── servo.rs            # ServoCmdWrapper
 ```

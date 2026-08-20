@@ -406,7 +406,7 @@ impl Driver {
         Ok(guard)
     }
 
-    /// 等待指定 RequestKind 的 Response
+    /// 等待指定 RequestType 的 Response
     fn wait_for_response(
         &self,
         kind: RequestType,

@@ -1,6 +1,6 @@
 //! 请求帧定义
 //!
-//! 所有下行操作统一为 Request 帧，RequestKind 首字节区分具体操作类型。
+//! 所有下行操作统一为 Request 帧，RequestType 首字节区分具体操作类型。
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
