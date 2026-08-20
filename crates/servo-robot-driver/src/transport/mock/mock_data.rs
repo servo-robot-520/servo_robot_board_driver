@@ -144,7 +144,8 @@ impl PowerSimulator {
         let servo_voltage = 8.6 + rng.random_range(-0.5f32..0.5f32);
         let servo_current = 12.5 + rng.random_range(-7.5f32..7.5f32);
         let bat_voltage = self.battery_voltage + rng.random_range(-0.3f32..0.3f32);
-        let bat_current = if self.charging { 1.5 } else { -1.0 } + rng.random_range(-0.5f32..0.5f32);
+        let bat_current =
+            if self.charging { 1.5 } else { -1.0 } + rng.random_range(-0.5f32..0.5f32);
 
         crate::protocol::power::PowerData {
             servo_voltage_mv: (servo_voltage * 10.0) as u16,
@@ -227,14 +228,43 @@ impl BatterySimulator {
             technology: crate::protocol::battery_state::BatteryTechnology::LiPo,
             present: true,
             serial_number: 12345,
-            cell_voltages_mv: cell_voltages_f32.iter().map(|v| (v * 1000.0) as u16).collect(),
+            cell_voltages_mv: cell_voltages_f32
+                .iter()
+                .map(|v| (v * 1000.0) as u16)
+                .collect(),
             cell_temperatures: cell_temps_f32.iter().map(|t| (t * 10.0) as i16).collect(),
         }
     }
 }
 
-/// 系统信息模拟（包含温度数据）
-pub struct SystemSimulator {
+/// 设备信息模拟（静态信息）
+pub struct DeviceInfoSimulator {
+    pub generated: bool,
+}
+
+impl DeviceInfoSimulator {
+    pub fn new() -> Self {
+        DeviceInfoSimulator { generated: false }
+    }
+
+    pub fn generate(&mut self) -> crate::protocol::device_info::DeviceInfo {
+        self.generated = true;
+        crate::protocol::device_info::DeviceInfo {
+            device_id: 0x4832, // STM32F4 device ID
+            uid: 0x12345678,   // 模拟唯一ID
+            imu_id: 0x70,      // IMU ID
+            firmware_version: crate::protocol::device_info::Version::new(0, 1, 0),
+            ram_kb: 128,
+            flash_boot_kb: 16,
+            flash_app_kb: 240,
+            flash_ota_kb: 128,
+            flash_user_kb: 128,
+        }
+    }
+}
+
+/// 诊断数据模拟（运行时状态）
+pub struct DiagnosticSimulator {
     pub start_time: Instant,
     pub frame_count: u32,
     pub charging: bool,
@@ -242,9 +272,9 @@ pub struct SystemSimulator {
     pub runtime_secs: f32,
 }
 
-impl SystemSimulator {
+impl DiagnosticSimulator {
     pub fn new() -> Self {
-        SystemSimulator {
+        DiagnosticSimulator {
             start_time: Instant::now(),
             frame_count: 0,
             charging: false,
@@ -253,7 +283,7 @@ impl SystemSimulator {
         }
     }
 
-    pub fn generate(&mut self, dt: f32) -> crate::protocol::system::SystemInfo {
+    pub fn generate(&mut self, dt: f32) -> crate::protocol::diagnostic::Diagnostic {
         let mut rng = rand::rng();
         self.frame_count += 1;
         self.runtime_secs += dt;
@@ -270,10 +300,7 @@ impl SystemSimulator {
         let temp_charge = self.base_temp + warmup + 20.0 + rng.random_range(-1.0f32..1.0);
         let temp_bat = self.base_temp + warmup + 2.0 + rng.random_range(-0.5f32..0.5);
 
-        crate::protocol::system::SystemInfo {
-            device_id: 0x4832, // STM32F4 device ID
-            uid: 0x12345678,   // 模拟唯一ID
-            imu_id: 0x70,      // IMU ID
+        crate::protocol::diagnostic::Diagnostic {
             uptime_s: uptime as u32,
             cpu_usage_percent: 35 + rng.random_range(0u8..15),
             free_heap_kb: 120 + rng.random_range(0u16..30),
@@ -285,7 +312,6 @@ impl SystemSimulator {
             frames_sent_total: self.frame_count,
             pd_request_voltage_mv: pd_voltage,
             pd_request_current_ma: pd_current,
-            firmware_version: crate::protocol::system::Version::new(0, 1, 0),
             temp_servo_power: (temp_servo * 10.0) as i16,
             temp_5v_power: (temp_5v * 10.0) as i16,
             temp_mcu: (temp_mcu * 10.0) as i16,
@@ -415,13 +441,7 @@ mod tests {
             .zip(state2.cell_voltages_mv.iter())
             .enumerate()
         {
-            assert_eq!(
-                v1, v2,
-                "Cell{} voltage mismatch: {} vs {}",
-                i + 1,
-                v1,
-                v2
-            );
+            assert_eq!(v1, v2, "Cell{} voltage mismatch: {} vs {}", i + 1, v1, v2);
         }
     }
 }

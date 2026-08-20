@@ -15,10 +15,10 @@ use servo_robot_driver::protocol::config::ConfigType;
 use servo_robot_driver::protocol::imu::ImuData;
 use servo_robot_driver::protocol::power::PowerData;
 use servo_robot_driver::{Driver, DriverCallback, MockTransport};
+use servo_robot_protocol::log::LogLevel::OFF;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use servo_robot_protocol::log::LogLevel::OFF;
 
 /// 测试回调收集器
 struct TestCallback {
@@ -383,7 +383,10 @@ fn test_driver_auto_reconnect() {
 
     driver.start().unwrap();
     // 初始连接已建立
-    assert!(wait_until(Duration::from_secs(2), || driver.state().frame_count() > 0));
+    assert!(wait_until(Duration::from_secs(2), || driver
+        .state()
+        .frame_count()
+        > 0));
 
     // 3 帧后断开 → 自动重连 → 恢复连接
     assert!(
@@ -394,11 +397,17 @@ fn test_driver_auto_reconnect() {
         wait_until(Duration::from_secs(3), || driver.state().is_connected()),
         "should reconnect"
     );
-    assert!(calls.load(Ordering::SeqCst) >= 2, "factory must be re-invoked for reconnect");
+    assert!(
+        calls.load(Ordering::SeqCst) >= 2,
+        "factory must be re-invoked for reconnect"
+    );
 
     // 重连后仍能收帧
     let before = driver.state().frame_count();
-    assert!(wait_until(Duration::from_secs(2), || driver.state().frame_count() > before));
+    assert!(wait_until(Duration::from_secs(2), || driver
+        .state()
+        .frame_count()
+        > before));
 
     // 恢复的实例上命令同步往返正常
     let ok = driver
@@ -411,13 +420,11 @@ fn test_driver_auto_reconnect() {
 
 #[test]
 fn test_driver_reconnect_gives_up() {
-    use servo_robot_driver::transport::FnTransportFactory;
     use servo_robot_driver::ReconnectConfig;
+    use servo_robot_driver::transport::FnTransportFactory;
 
     // 工厂永远失败,max_retries=1 → 重试耗尽后读循环退出,不再空转
-    let factory = FnTransportFactory::new(|| {
-        Err(servo_robot_driver::DriverError::TransportClosed)
-    });
+    let factory = FnTransportFactory::new(|| Err(servo_robot_driver::DriverError::TransportClosed));
     let config = ReconnectConfig::new(1).with_retry_interval(Duration::from_millis(10));
     let mut driver = Driver::new_with_reconnect(factory, config);
 
@@ -429,7 +436,10 @@ fn test_driver_reconnect_gives_up() {
     );
     // 重试耗尽后读循环记录 TransportClosed 错误并退出
     assert!(
-        wait_until(Duration::from_secs(2), || driver.state().last_error().is_some()),
+        wait_until(Duration::from_secs(2), || driver
+            .state()
+            .last_error()
+            .is_some()),
         "give-up should record TransportClosed error"
     );
     driver.stop().unwrap();
@@ -444,7 +454,9 @@ fn test_driver_command_and_firmware_sync() {
     driver.start().unwrap();
 
     // mock 回 AckCommand{success:true}
-    let ok = driver.send_command_sync(&Command::new(CommandType::Reset)).unwrap();
+    let ok = driver
+        .send_command_sync(&Command::new(CommandType::Reset))
+        .unwrap();
     assert!(ok);
 
     // mock 回 AckFirmwareUpdate{success:true, offset}

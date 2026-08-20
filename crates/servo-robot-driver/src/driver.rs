@@ -235,7 +235,10 @@ impl Driver {
     }
 
     /// 转发舵机命令并等待响应
-    pub fn forward_servo_sync(&self, cmd: &ServoCmdWrapper) -> Result<ServoCmdWrapper, DriverError> {
+    pub fn forward_servo_sync(
+        &self,
+        cmd: &ServoCmdWrapper,
+    ) -> Result<ServoCmdWrapper, DriverError> {
         self.forward_servo(cmd)?;
         self.wait_for_ack_servo_cmd(DEFAULT_TIMEOUT)
     }

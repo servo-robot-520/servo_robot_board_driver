@@ -241,7 +241,7 @@ typedef struct {
     uint16_t error_flags;
 } sr_board_event;
 
-/// 系统信息(含温度数据)
+/// 设备标识与内存布局（静态信息）
 typedef struct {
     /// STM32 设备 ID
     uint16_t device_id;
@@ -249,6 +249,23 @@ typedef struct {
     uint32_t uid;
     /// IMU 的 ID
     uint8_t imu_id;
+    uint8_t fw_major;
+    uint8_t fw_minor;
+    uint8_t fw_patch;
+    /// RAM 大小 (KB)
+    uint16_t ram_kb;
+    /// Bootloader Flash (KB)
+    uint16_t flash_boot_kb;
+    /// Application Flash (KB)
+    uint16_t flash_app_kb;
+    /// OTA Temp Flash (KB)
+    uint16_t flash_ota_kb;
+    /// User Data Flash (KB)
+    uint16_t flash_user_kb;
+} sr_device_info;
+
+/// 运行时诊断数据
+typedef struct {
     /// 运行时间(s)
     uint32_t uptime_s;
     /// CPU 占用率(%)
@@ -267,9 +284,6 @@ typedef struct {
     uint16_t pd_request_voltage_mv;
     /// PD 握手请求电流(mA)
     uint16_t pd_request_current_ma;
-    uint8_t fw_major;
-    uint8_t fw_minor;
-    uint8_t fw_patch;
     /* 温度字段:实际值 = 原始值 / 10 */
     /// 舵机电源温度
     int16_t temp_servo_power;
@@ -281,7 +295,7 @@ typedef struct {
     int16_t temp_charge;
     /// 电池温度
     int16_t temp_battery;
-} sr_system_info;
+} sr_diagnostic;
 
 /// 板级日志消息
 typedef struct {
@@ -306,7 +320,8 @@ typedef struct {
     void (*on_battery_state)(void* userdata, const sr_battery_state* state);
     void (*on_config_snapshot)(void* userdata, const sr_board_config* config);
     void (*on_board_event)(void* userdata, const sr_board_event* event);
-    void (*on_system_info)(void* userdata, const sr_system_info* info);
+    void (*on_device_info)(void* userdata, const sr_device_info* info);
+    void (*on_diagnostic)(void* userdata, const sr_diagnostic* diag);
     void (*on_log)(void* userdata, const sr_log_message* msg);
     void (*on_ack_cfg_write)(void* userdata, uint8_t success);
     void (*on_ack_cfg_query)(void* userdata, const sr_config* config);

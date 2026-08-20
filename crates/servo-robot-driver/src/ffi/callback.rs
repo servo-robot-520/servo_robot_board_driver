@@ -4,20 +4,21 @@
 //! 且回调内禁止调用任何 `sr_driver_*` 函数(尤其 `sr_driver_free`,会自死锁)。
 
 use super::{
-    err_code, SrBoardConfig, SrBoardEvent, SrBatteryState, SrConfig, SrImu, SrLogMessage,
-    SrPower, SrSystemInfo,
+    SrBatteryState, SrBoardConfig, SrBoardEvent, SrConfig, SrDeviceInfo, SrDiagnostic, SrImu,
+    SrLogMessage, SrPower, err_code,
 };
 use crate::dispatch::callback::DriverCallback;
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
 use crate::protocol::config::{BoardConfigSnapshot, Config};
+use crate::protocol::device_info::DeviceInfo;
+use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::LogMessage;
 use crate::protocol::power::PowerData;
 use crate::protocol::servo::ServoCmdWrapper;
-use crate::protocol::system::SystemInfo;
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::sync::{Arc, Mutex};
 
 /// C 回调表 — 与 `include/servo_robot_driver.h` 的 `sr_callbacks` 严格一致。
@@ -33,7 +34,8 @@ pub struct SrCallbacks {
     pub on_battery_state: Option<extern "C" fn(*mut c_void, *const SrBatteryState)>,
     pub on_config_snapshot: Option<extern "C" fn(*mut c_void, *const SrBoardConfig)>,
     pub on_board_event: Option<extern "C" fn(*mut c_void, *const SrBoardEvent)>,
-    pub on_system_info: Option<extern "C" fn(*mut c_void, *const SrSystemInfo)>,
+    pub on_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
+    pub on_diagnostic: Option<extern "C" fn(*mut c_void, *const SrDiagnostic)>,
     pub on_log: Option<extern "C" fn(*mut c_void, *const SrLogMessage)>,
     pub on_ack_cfg_write: Option<extern "C" fn(*mut c_void, u8)>,
     pub on_ack_cfg_query: Option<extern "C" fn(*mut c_void, *const SrConfig)>,
@@ -166,33 +168,48 @@ impl DriverCallback for CffiCallback {
         });
     }
 
-    fn on_system_info(&mut self, info: &SystemInfo) {
-        let sr = SrSystemInfo {
+    fn on_device_info(&mut self, info: &DeviceInfo) {
+        let sr = SrDeviceInfo {
             device_id: info.device_id,
             uid: info.uid,
             imu_id: info.imu_id,
-            uptime_s: info.uptime_s,
-            cpu_usage_percent: info.cpu_usage_percent,
-            free_heap_kb: info.free_heap_kb,
-            stack_watermark_min_kb: info.stack_watermark_min_kb,
-            i2c_error_count: info.i2c_error_count,
-            spi_error_count: info.spi_error_count,
-            uart_error_count: info.uart_error_count,
-            usb_error_count: info.usb_error_count,
-            frames_sent_total: info.frames_sent_total,
-            pd_request_voltage_mv: info.pd_request_voltage_mv,
-            pd_request_current_ma: info.pd_request_current_ma,
             fw_major: info.firmware_version.major,
             fw_minor: info.firmware_version.minor,
             fw_patch: info.firmware_version.patch,
-            temp_servo_power: info.temp_servo_power,
-            temp_5v_power: info.temp_5v_power,
-            temp_mcu: info.temp_mcu,
-            temp_charge: info.temp_charge,
-            temp_battery: info.temp_battery,
+            ram_kb: info.ram_kb,
+            flash_boot_kb: info.flash_boot_kb,
+            flash_app_kb: info.flash_app_kb,
+            flash_ota_kb: info.flash_ota_kb,
+            flash_user_kb: info.flash_user_kb,
         };
         self.with_table(|cb| {
-            if let Some(f) = cb.on_system_info {
+            if let Some(f) = cb.on_device_info {
+                f(cb.userdata, &sr)
+            }
+        });
+    }
+
+    fn on_diagnostic(&mut self, diag: &Diagnostic) {
+        let sr = SrDiagnostic {
+            uptime_s: diag.uptime_s,
+            cpu_usage_percent: diag.cpu_usage_percent,
+            free_heap_kb: diag.free_heap_kb,
+            stack_watermark_min_kb: diag.stack_watermark_min_kb,
+            i2c_error_count: diag.i2c_error_count,
+            spi_error_count: diag.spi_error_count,
+            uart_error_count: diag.uart_error_count,
+            usb_error_count: diag.usb_error_count,
+            frames_sent_total: diag.frames_sent_total,
+            pd_request_voltage_mv: diag.pd_request_voltage_mv,
+            pd_request_current_ma: diag.pd_request_current_ma,
+            temp_servo_power: diag.temp_servo_power,
+            temp_5v_power: diag.temp_5v_power,
+            temp_mcu: diag.temp_mcu,
+            temp_charge: diag.temp_charge,
+            temp_battery: diag.temp_battery,
+        };
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_diagnostic {
                 f(cb.userdata, &sr)
             }
         });

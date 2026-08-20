@@ -19,8 +19,8 @@ use crate::reconnect::ReconnectConfig;
 use crate::transport::serial::SerialTransport;
 use crate::transport::{FnTransportFactory, Transport};
 use callback::{CallbackTable, CffiCallback, SrCallbacks};
-use std::ffi::{c_char, CStr};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::ffi::{CStr, c_char};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -141,10 +141,23 @@ pub struct SrBoardEvent {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct SrSystemInfo {
+pub struct SrDeviceInfo {
     pub device_id: u16,
     pub uid: u32,
     pub imu_id: u8,
+    pub fw_major: u8,
+    pub fw_minor: u8,
+    pub fw_patch: u8,
+    pub ram_kb: u16,
+    pub flash_boot_kb: u16,
+    pub flash_app_kb: u16,
+    pub flash_ota_kb: u16,
+    pub flash_user_kb: u16,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SrDiagnostic {
     pub uptime_s: u32,
     pub cpu_usage_percent: u8,
     pub free_heap_kb: u16,
@@ -156,9 +169,6 @@ pub struct SrSystemInfo {
     pub frames_sent_total: u32,
     pub pd_request_voltage_mv: u16,
     pub pd_request_current_ma: u16,
-    pub fw_major: u8,
-    pub fw_minor: u8,
-    pub fw_patch: u8,
     pub temp_servo_power: i16,
     pub temp_5v_power: i16,
     pub temp_mcu: i16,
@@ -329,8 +339,7 @@ pub extern "C" fn sr_driver_open_reconnect(
             .to_string_lossy()
             .into_owned();
         let factory = FnTransportFactory::new(move || {
-            SerialTransport::open(&port_name, baud_rate)
-                .map(|t| Box::new(t) as Box<dyn Transport>)
+            SerialTransport::open(&port_name, baud_rate).map(|t| Box::new(t) as Box<dyn Transport>)
         });
         let config = ReconnectConfig {
             max_retries,
@@ -437,10 +446,7 @@ pub extern "C" fn sr_driver_query_config(d: *mut SrDriver, typ: u8, out: *mut Sr
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sr_driver_query_all_configs(
-    d: *mut SrDriver,
-    out: *mut SrBoardConfig,
-) -> i32 {
+pub extern "C" fn sr_driver_query_all_configs(d: *mut SrDriver, out: *mut SrBoardConfig) -> i32 {
     if out.is_null() {
         return SR_ERR_NULL;
     }
@@ -454,11 +460,7 @@ pub extern "C" fn sr_driver_query_all_configs(
 // ═══ 舵机 ═══
 
 #[unsafe(no_mangle)]
-pub extern "C" fn sr_driver_forward_servo(
-    d: *mut SrDriver,
-    data: *const u8,
-    len: usize,
-) -> i32 {
+pub extern "C" fn sr_driver_forward_servo(d: *mut SrDriver, data: *const u8, len: usize) -> i32 {
     if len > 0 && data.is_null() {
         return SR_ERR_NULL;
     }
@@ -610,11 +612,7 @@ pub extern "C" fn sr_driver_set_callbacks(d: *mut SrDriver, cbs: *const SrCallba
 
 /// 拷贝最近一次错误的描述(截断 + NUL 结尾)
 #[unsafe(no_mangle)]
-pub extern "C" fn sr_driver_last_error(
-    d: *mut SrDriver,
-    buf: *mut c_char,
-    len: usize,
-) -> i32 {
+pub extern "C" fn sr_driver_last_error(d: *mut SrDriver, buf: *mut c_char, len: usize) -> i32 {
     if d.is_null() || buf.is_null() || len == 0 {
         return SR_ERR_NULL;
     }
@@ -653,10 +651,34 @@ mod tests {
     fn test_config_roundtrip() {
         // 四类取值: bool / u8 / u16 / u32
         let cases: &[(SrConfig, f32)] = &[
-            (SrConfig { typ: 0x10, value: 1.0 }, 1.0),  // SwitchPowerServo
-            (SrConfig { typ: 0x20, value: 80.0 }, 80.0), // ChargeStopSoc
-            (SrConfig { typ: 0x30, value: 500.0 }, 500.0), // PowerServoCurrentLimitMa
-            (SrConfig { typ: 0x37, value: 1000000.0 }, 1000000.0), // ServoBaudRate
+            (
+                SrConfig {
+                    typ: 0x10,
+                    value: 1.0,
+                },
+                1.0,
+            ), // SwitchPowerServo
+            (
+                SrConfig {
+                    typ: 0x20,
+                    value: 80.0,
+                },
+                80.0,
+            ), // ChargeStopSoc
+            (
+                SrConfig {
+                    typ: 0x30,
+                    value: 500.0,
+                },
+                500.0,
+            ), // PowerServoCurrentLimitMa
+            (
+                SrConfig {
+                    typ: 0x37,
+                    value: 1000000.0,
+                },
+                1000000.0,
+            ), // ServoBaudRate
         ];
         for (src, expected) in cases {
             let cfg = config_from_sr(*src).expect("valid config type");
@@ -665,8 +687,23 @@ mod tests {
             assert_eq!(back.value, *expected);
         }
         // 非法 type
-        assert!(config_from_sr(SrConfig { typ: 0x99, value: 0.0 }).is_none());
-        assert_eq!(sr_driver_write_config(ptr::null_mut(), SrConfig { typ: 0x99, value: 0.0 }), SR_ERR_NULL);
+        assert!(
+            config_from_sr(SrConfig {
+                typ: 0x99,
+                value: 0.0
+            })
+            .is_none()
+        );
+        assert_eq!(
+            sr_driver_write_config(
+                ptr::null_mut(),
+                SrConfig {
+                    typ: 0x99,
+                    value: 0.0
+                }
+            ),
+            SR_ERR_NULL
+        );
     }
 
     #[test]
@@ -693,7 +730,11 @@ mod tests {
             err_buf.len(),
         );
         assert!(d.is_null());
-        assert!(!unsafe { CStr::from_ptr(err_buf.as_ptr()) }.to_string_lossy().is_empty());
+        assert!(
+            !unsafe { CStr::from_ptr(err_buf.as_ptr()) }
+                .to_string_lossy()
+                .is_empty()
+        );
         // NaN 同样拒绝
         let d = sr_driver_open_reconnect(
             b"/dev/ttyUSB0\0".as_ptr() as *const c_char,
@@ -740,7 +781,10 @@ mod tests {
         let mut success = 0u8;
         let rc = sr_driver_write_config_sync(
             d,
-            SrConfig { typ: 0x37, value: 1000000.0 },
+            SrConfig {
+                typ: 0x37,
+                value: 1000000.0,
+            },
             &mut success,
         );
         assert_eq!(rc, SR_OK);
@@ -768,7 +812,10 @@ mod tests {
     fn test_query_config_invalid_type() {
         let d = boxed_ptr();
         let mut out = SrConfig { typ: 0, value: 0.0 };
-        assert_eq!(sr_driver_query_config(d, 0x99, &mut out), SR_ERR_INVALID_ARG);
+        assert_eq!(
+            sr_driver_query_config(d, 0x99, &mut out),
+            SR_ERR_INVALID_ARG
+        );
         sr_driver_free(d);
     }
 
@@ -781,7 +828,14 @@ mod tests {
         let mut out_len = 0usize;
         // mock 不对舵机帧回 ACK → 1s 超时
         assert_eq!(
-            sr_driver_forward_servo_sync(d, data.as_ptr(), data.len(), out.as_mut_ptr(), out.len(), &mut out_len),
+            sr_driver_forward_servo_sync(
+                d,
+                data.as_ptr(),
+                data.len(),
+                out.as_mut_ptr(),
+                out.len(),
+                &mut out_len
+            ),
             SR_ERR_TIMEOUT
         );
         assert_eq!(sr_driver_stop(d), SR_OK);
@@ -796,7 +850,11 @@ mod tests {
         // last_error 有记录
         let mut buf = [0 as c_char; 64];
         assert_eq!(sr_driver_last_error(d, buf.as_mut_ptr(), buf.len()), SR_OK);
-        assert!(!unsafe { CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().is_empty());
+        assert!(
+            !unsafe { CStr::from_ptr(buf.as_ptr()) }
+                .to_string_lossy()
+                .is_empty()
+        );
         sr_driver_free(d);
     }
 

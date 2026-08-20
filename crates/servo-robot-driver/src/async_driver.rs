@@ -110,9 +110,7 @@ impl AsyncDriver {
     }
 
     /// 查询所有配置并等待响应
-    pub async fn query_all_configs_sync(
-        &self,
-    ) -> Result<BoardConfigSnapshot, DriverError> {
+    pub async fn query_all_configs_sync(&self) -> Result<BoardConfigSnapshot, DriverError> {
         self.call(|d| d.query_all_configs_sync()).await
     }
 

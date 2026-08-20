@@ -120,9 +120,13 @@ pub(crate) fn decode_and_dispatch(
             state.update_event(event.clone());
             DriverEvent::BoardEvent(event)
         }
-        TypedFrame::System(info) => {
-            state.update_system(info.clone());
-            DriverEvent::SystemInfo(info)
+        TypedFrame::DeviceInfo(info) => {
+            state.update_device_info(info.clone());
+            DriverEvent::DeviceInfo(info)
+        }
+        TypedFrame::Diagnostic(diag) => {
+            state.update_diagnostic(diag.clone());
+            DriverEvent::Diagnostic(diag)
         }
         TypedFrame::Log(log_msg) => {
             let ts = std::time::SystemTime::now()

@@ -21,11 +21,12 @@ pub enum DriverEvent {
     // ═══ 上行数据 ═══
     ImuData(crate::protocol::imu::ImuData),
     PowerData(crate::protocol::power::PowerData),
-    // ThermalData 已合并到 SystemInfo
+    // ThermalData 已合并到 Diagnostic
     BatteryState(crate::protocol::battery_state::BatteryState),
     ConfigSnapshot(crate::protocol::config::BoardConfigSnapshot),
     BoardEvent(crate::protocol::event::BoardEvent),
-    SystemInfo(crate::protocol::system::SystemInfo),
+    DeviceInfo(crate::protocol::device_info::DeviceInfo),
+    Diagnostic(crate::protocol::diagnostic::Diagnostic),
     /// 日志事件 (时间戳: Unix 毫秒, 日志内容)
     Log(u64, crate::protocol::log::LogMessage),
 
@@ -149,7 +150,8 @@ impl EventBus {
                 DriverEvent::BatteryState(d) => cb.on_battery_state(d),
                 DriverEvent::ConfigSnapshot(d) => cb.on_config_snapshot(d),
                 DriverEvent::BoardEvent(d) => cb.on_board_event(d),
-                DriverEvent::SystemInfo(d) => cb.on_system_info(d),
+                DriverEvent::DeviceInfo(d) => cb.on_device_info(d),
+                DriverEvent::Diagnostic(d) => cb.on_diagnostic(d),
                 DriverEvent::Log(ts, d) => cb.on_log(*ts, d),
                 DriverEvent::AckCfgWrite { success } => cb.on_ack_cfg_write(*success),
                 DriverEvent::AckCfgQuery(config) => cb.on_ack_cfg_query(config),

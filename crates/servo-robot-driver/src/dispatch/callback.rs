@@ -10,12 +10,13 @@
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
 use crate::protocol::config::{BoardConfigSnapshot, Config};
+use crate::protocol::device_info::DeviceInfo;
+use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::{LogLevel, LogMessage};
 use crate::protocol::power::PowerData;
 use crate::protocol::servo::ServoCmdWrapper;
-use crate::protocol::system::SystemInfo;
 
 /// 回调 trait — 实现感兴趣的回调，其余用默认空实现
 ///
@@ -44,7 +45,8 @@ pub trait DriverCallback: Send + 'static {
     fn on_battery_state(&mut self, _state: &BatteryState) {}
     fn on_config_snapshot(&mut self, _config: &BoardConfigSnapshot) {}
     fn on_board_event(&mut self, _event: &BoardEvent) {}
-    fn on_system_info(&mut self, _info: &SystemInfo) {}
+    fn on_device_info(&mut self, _info: &DeviceInfo) {}
+    fn on_diagnostic(&mut self, _diag: &Diagnostic) {}
 
     /// 板级日志回调
     ///

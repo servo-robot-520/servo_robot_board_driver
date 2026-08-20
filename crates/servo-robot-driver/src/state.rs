@@ -10,14 +10,15 @@
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
 use crate::protocol::config::BoardConfigSnapshot;
+use crate::protocol::device_info::DeviceInfo;
+use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::power::PowerData;
-use crate::protocol::system::SystemInfo;
+use servo_robot_protocol::log::LogMessage;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::Instant;
-use servo_robot_protocol::log::LogMessage;
 
 /// 板级日志条目（带时间戳）
 #[derive(Debug, Clone)]
@@ -37,11 +38,12 @@ pub struct DriverState {
 struct StateInner {
     pub imu: Option<ImuData>,
     pub power: Option<PowerData>,
-    // thermal 已合并到 SystemInfo
+    // thermal 已合并到 Diagnostic
     pub battery: Option<BatteryState>,
     pub config: Option<BoardConfigSnapshot>,
     pub event: Option<BoardEvent>,
-    pub system: Option<SystemInfo>,
+    pub device_info: Option<DeviceInfo>,
+    pub diagnostic: Option<Diagnostic>,
     pub logs: VecDeque<LogEntry>,
     pub last_error: Option<DriverError>,
     pub connected: bool,
@@ -60,7 +62,8 @@ impl DriverState {
                 battery: None,
                 config: None,
                 event: None,
-                system: None,
+                device_info: None,
+                diagnostic: None,
                 logs: VecDeque::with_capacity(LOG_BUFFER_SIZE),
                 last_error: None,
                 connected: false,
@@ -81,7 +84,8 @@ impl DriverState {
             battery: inner.battery.clone(),
             config: inner.config.clone(),
             event: inner.event.clone(),
-            system: inner.system.clone(),
+            device_info: inner.device_info.clone(),
+            diagnostic: inner.diagnostic.clone(),
             logs: inner.logs.clone(),
             connected: inner.connected,
             frame_count: inner.frame_count,
@@ -99,9 +103,9 @@ impl DriverState {
         self.inner.lock().unwrap().power.clone()
     }
 
-    /// 获取系统信息快照(SystemInfo 含温度数据;thermal 已合并到 SystemInfo)
-    pub fn thermal(&self) -> Option<crate::protocol::system::SystemInfo> {
-        self.inner.lock().unwrap().system.clone()
+    /// 获取诊断数据快照（运行时 CPU/内存/温度等）
+    pub fn diagnostic(&self) -> Option<Diagnostic> {
+        self.inner.lock().unwrap().diagnostic.clone()
     }
 
     pub fn battery(&self) -> Option<BatteryState> {
@@ -116,8 +120,8 @@ impl DriverState {
         self.inner.lock().unwrap().event.clone()
     }
 
-    pub fn system(&self) -> Option<SystemInfo> {
-        self.inner.lock().unwrap().system.clone()
+    pub fn device_info(&self) -> Option<DeviceInfo> {
+        self.inner.lock().unwrap().device_info.clone()
     }
 
     /// 获取最新一条日志
@@ -194,9 +198,15 @@ impl DriverState {
         inner.frame_count += 1;
     }
 
-    pub(crate) fn update_system(&self, info: SystemInfo) {
+    pub(crate) fn update_device_info(&self, info: DeviceInfo) {
         let mut inner = self.inner.lock().unwrap();
-        inner.system = Some(info);
+        inner.device_info = Some(info);
+        inner.frame_count += 1;
+    }
+
+    pub(crate) fn update_diagnostic(&self, diag: Diagnostic) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.diagnostic = Some(diag);
         inner.frame_count += 1;
     }
 
@@ -222,11 +232,12 @@ impl DriverState {
 pub struct StateSnapshot {
     pub imu: Option<ImuData>,
     pub power: Option<PowerData>,
-    // thermal 已合并到 SystemInfo
+    // thermal 已合并到 Diagnostic
     pub battery: Option<BatteryState>,
     pub config: Option<BoardConfigSnapshot>,
     pub event: Option<BoardEvent>,
-    pub system: Option<SystemInfo>,
+    pub device_info: Option<DeviceInfo>,
+    pub diagnostic: Option<Diagnostic>,
     pub logs: VecDeque<LogEntry>,
     pub connected: bool,
     pub frame_count: u64,

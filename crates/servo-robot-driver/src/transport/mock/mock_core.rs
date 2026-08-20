@@ -22,9 +22,10 @@ pub(crate) struct MockCore {
     priority_queue: VecDeque<Vec<u8>>,
     imu: ImuSimulator,
     power: PowerSimulator,
-    // thermal 已合并到 system
+    // thermal 已合并到 Diagnostic
     battery: BatterySimulator,
-    system: SystemSimulator,
+    device_info: DeviceInfoSimulator,
+    diagnostic: DiagnosticSimulator,
     event: EventSimulator,
     config: BoardConfigSnapshot,
     last_imu: Instant,
@@ -48,7 +49,8 @@ impl MockCore {
             imu: ImuSimulator::new(),
             power: PowerSimulator::new(),
             battery: BatterySimulator::new(),
-            system: SystemSimulator::new(),
+            device_info: DeviceInfoSimulator::new(),
+            diagnostic: DiagnosticSimulator::new(),
             event: EventSimulator::new(),
             config: BoardConfigSnapshot::default(),
             last_imu: now,
@@ -78,7 +80,7 @@ impl MockCore {
     pub fn set_charging(&mut self, charging: bool) {
         self.power.charging = charging;
         self.battery.charging = charging;
-        self.system.charging = charging;
+        self.diagnostic.charging = charging;
         self.event.charging = charging;
     }
 
@@ -175,12 +177,24 @@ impl MockCore {
             self.last_battery = now;
         }
 
-        // System 1Hz (1000ms) - 包含温度数据
+        // DeviceInfo: 每 60 秒发送一次（静态信息）
+        if !self.device_info.generated
+            || now.duration_since(self.last_system) >= Duration::from_secs(60)
+        {
+            let data = self.device_info.generate();
+            let frame = RawFrame {
+                frame_type: FrameType::DeviceInfo,
+                payload: data.to_bytes(),
+            };
+            self.rx_queue.push_back(frame.encode());
+        }
+
+        // Diagnostic 1Hz (1000ms) - 运行时诊断数据
         if now.duration_since(self.last_system) >= Duration::from_millis(1000) {
             let dt = now.duration_since(self.last_system).as_secs_f32();
-            let data = self.system.generate(dt);
+            let data = self.diagnostic.generate(dt);
             let frame = RawFrame {
-                frame_type: FrameType::System,
+                frame_type: FrameType::Diagnostic,
                 payload: data.to_bytes(),
             };
             self.rx_queue.push_back(frame.encode());

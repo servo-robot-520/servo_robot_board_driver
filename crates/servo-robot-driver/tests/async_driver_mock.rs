@@ -2,12 +2,12 @@
 
 #![cfg(all(feature = "mock", feature = "async"))]
 
-use servo_robot_driver::protocol::config::Config;
 use servo_robot_driver::protocol::command::Command;
+use servo_robot_driver::protocol::config::Config;
 use servo_robot_driver::protocol::servo::ServoCmdWrapper;
 use servo_robot_driver::{AsyncDriver, DriverCallback, MockTransport};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// 计数回调:统计 IMU / Power 回调次数(计数 Arc 共享,克隆体计数同一组)
@@ -120,7 +120,9 @@ async fn test_send_command_sync_success() {
 
     // mock 对 Command 帧回 AckCommand{success:true}
     let ok = driver
-        .send_command_sync(Command::new(servo_robot_driver::protocol::command::CommandType::Reset))
+        .send_command_sync(Command::new(
+            servo_robot_driver::protocol::command::CommandType::Reset,
+        ))
         .await
         .expect("mock ACKs command frames");
     assert!(ok);
