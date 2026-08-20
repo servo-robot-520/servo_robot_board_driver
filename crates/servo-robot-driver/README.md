@@ -239,18 +239,18 @@ impl DriverCallback for MyCallback {
         println!("Battery: {:.1}%", state.percentage);
     }
 
-    fn on_device_info(&mut self, info: &DeviceInfo) {
-        println!("Device: id={:#06x} firmware={}", info.device_id, info.firmware_version);
-    }
-
     fn on_diagnostic(&mut self, diag: &Diagnostic) {
         println!("CPU: {}%  uptime: {}s  MCU temp: {:.1}°C",
             diag.cpu_usage_percent, diag.uptime_s, diag.temp_mcu as f32 / 10.0);
     }
 
-    fn on_response(&mut self, resp: &Response) {
-        println!("Response: {:?} success={} data={:?}",
-            resp.request_kind, resp.success, resp.data);
+    fn on_device_info(&mut self, info: &DeviceInfo) {
+        println!("Device: id={:#06x} FW={} RAM={}KB",
+            info.device_id, info.firmware_version, info.ram_kb);
+    }
+
+    fn on_ack_cfg_query(&mut self, config: &Config) {
+        println!("Config query response: {:?}", config);
     }
 
     // 覆盖默认日志处理
@@ -400,9 +400,14 @@ gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
 | `on_battery_state` | 电池状态（10Hz）|
 | `on_config_snapshot` | 配置快照 |
 | `on_board_event` | 板级事件 |
-| `on_device_info` | 设备标识与内存布局（查询后推送）|
 | `on_diagnostic` | 运行时诊断（1Hz 推送）|
-| `on_response` | 统一应答 |
+| `on_ack_device_info` | 设备信息应答（DeviceInfo 查询后触发）|
+| `on_ack_cfg_write` | 配置写入确认 |
+| `on_ack_cfg_query` | 单个配置查询响应 |
+| `on_ack_cfg_query_all` | 所有配置查询响应 |
+| `on_ack_servo_cmd` | 舵机命令响应 |
+| `on_ack_command` | 系统命令确认（Reset/Shutdown/Ota）|
+| `on_ack_firmware_update` | 固件更新确认 |
 | `on_log` | 板级日志 |
 | `on_error` | 错误通知 |
 

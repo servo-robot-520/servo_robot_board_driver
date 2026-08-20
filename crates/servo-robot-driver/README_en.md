@@ -237,11 +237,12 @@ impl DriverCallback for MyCallback {
     }
 
     fn on_device_info(&mut self, info: &DeviceInfo) {
-        println!("Device: id={:#06x}, fw={}", info.device_id, info.firmware_version);
+        println!("Device: id={:#06x}, FW={}, RAM={}KB",
+            info.device_id, info.firmware_version, info.ram_kb);
     }
 
-    fn on_response(&mut self, resp: &Response) {
-        println!("Response: kind={:?}, success={}", resp.request_kind, resp.success);
+    fn on_ack_cfg_query(&mut self, config: &Config) {
+        println!("Config query: {:?}", config);
     }
 
     // Override default log handling
@@ -389,10 +390,15 @@ driver.register_callback(MyCallback { imu_count: 0 });
 | `on_battery_state` | Battery frame (10Hz) | Empty |
 | `on_config_snapshot` | Config snapshot | Empty |
 | `on_board_event` | Event frame (1Hz) | Empty |
-| `on_device_info` | DeviceInfo response | Empty |
 | `on_diagnostic` | Diagnostic frame (1Hz) | Empty |
+| `on_ack_device_info` | DeviceInfo query response | Empty |
+| `on_ack_cfg_write` | Config write ACK | Empty |
+| `on_ack_cfg_query` | Config query response | Empty |
+| `on_ack_cfg_query_all` | All configs response | Empty |
+| `on_ack_servo_cmd` | Servo command response | Empty |
+| `on_ack_command` | System command ACK (Reset/Shutdown/Ota) | Empty |
+| `on_ack_firmware_update` | Firmware update ACK | Empty |
 | `on_log(ts, log_msg)` | Board log frame | Output via `log` crate with `[ServoRobotBoard]` prefix |
-| `on_response` | Unified response (all Request types) | Empty |
 | `on_error` | Driver error | Empty |
 
 ## Log System
@@ -542,9 +548,14 @@ Optional callbacks in `sr_callbacks` (NULL = not registered):
 | `on_battery_state` | Battery state (10Hz) |
 | `on_config_snapshot` | Config snapshot |
 | `on_board_event` | Board event |
-| `on_device_info` | Device identity & memory layout (query response) |
 | `on_diagnostic` | Runtime diagnostics (1Hz push) |
-| `on_response` | Unified response |
+| `on_ack_device_info` | DeviceInfo query response |
+| `on_ack_cfg_write` | Config write ACK |
+| `on_ack_cfg_query` | Config query response |
+| `on_ack_cfg_query_all` | All configs response |
+| `on_ack_servo_cmd` | Servo command response |
+| `on_ack_command` | System command ACK (Reset/Shutdown/Ota) |
+| `on_ack_firmware_update` | Firmware update ACK |
 | `on_log` | Board log |
 | `on_error` | Error notification |
 
