@@ -63,7 +63,7 @@ CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
 
 ### RequestKind
 
-All downlink operations are unified into a single `Request (0x80)` frame; the first byte of the payload (`RequestKind`) identifies the specific operation.
+All downlink operations are unified into a single `Request (0x80)` frame; the first byte of the payload (`RequestType`) identifies the specific operation.
 
 | RequestKind | Value | Description | Expects Response |
 |-------------|-------|-------------|-----------------|
@@ -80,11 +80,11 @@ All downlink operations are unified into a single `Request (0x80)` frame; the fi
 ### Request / Response Wire Format
 
 ```
-Request:  FrameType(0x80) + payload[request_kind:1][data:N]
-Response: FrameType(0xC0) + payload[request_kind:1][success:1][data:N]
+Request:  FrameType(0x80) + payload[request_type:1][data:N]
+Response: FrameType(0xC0) + payload[request_type:1][success:1][data:N]
 ```
 
-- `request_kind`: echoes the `RequestKind` byte
+- `request_type`: echoes the `RequestType` byte
 - `success`: `0x01` = success, `0x00` = failure
 - `data`: response-specific payload (e.g. DeviceInfo, BoardConfigSnapshot, Config value)
 
@@ -439,7 +439,7 @@ use servo_robot_protocol::device_info::DeviceInfo;
 // Parse response
 let resp = Response::from_payload(&frame.payload)?;
 if resp.success {
-    match resp.request_kind {
+    match resp.request_type {
         RequestKind::DeviceInfo => {
             let info = DeviceInfo::from_bytes(&resp.data)?;
             println!("Firmware: {}", info.firmware_version);
@@ -474,7 +474,7 @@ match typed {
     TypedFrame::Imu(imu) => println!("IMU: {:?}", imu),
     TypedFrame::Battery(bat) => println!("Battery: {:.1}%", bat.percentage),
     TypedFrame::Diagnostic(diag) => println!("CPU: {}%", diag.cpu_usage_percent),
-    TypedFrame::Response(resp) => println!("Response: kind={:?}, ok={}", resp.request_kind, resp.success),
+    TypedFrame::Response(resp) => println!("Response: kind={:?}, ok={}", resp.request_type, resp.success),
     _ => {}
 }
 ```

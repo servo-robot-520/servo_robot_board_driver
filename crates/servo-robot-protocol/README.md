@@ -94,23 +94,23 @@ CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
 ### Request 帧结构
 
 ```
-Wire format: HEAD(0xAA) + TYPE(0x80) + LEN + [request_kind:1][data:N] + CRC
+Wire format: HEAD(0xAA) + TYPE(0x80) + LEN + [request_type:1][data:N] + CRC
 ```
 
 | 字段 | 类型 | 说明 |
 |-------|------|-------------|
-| request_kind | u8 | RequestKind 枚举值 |
+| request_type | u8 | RequestKind 枚举值 |
 | data | [u8] | 操作附带数据（如配置值、舵机命令字节、固件块等）|
 
 ### Response 帧结构
 
 ```
-Wire format: HEAD(0xAA) + TYPE(0xC0) + LEN + [request_kind:1][success:1][data:N] + CRC
+Wire format: HEAD(0xAA) + TYPE(0xC0) + LEN + [request_type:1][success:1][data:N] + CRC
 ```
 
 | 字段 | 类型 | 说明 |
 |-------|------|-------------|
-| request_kind | u8 | 对应的 RequestKind 值 |
+| request_type | u8 | 对应的 RequestKind 值 |
 | success | u8 | 0=失败，非0=成功 |
 | data | [u8] | 应答附带数据（如 Config、BoardConfigSnapshot、DeviceInfo 等）|
 
