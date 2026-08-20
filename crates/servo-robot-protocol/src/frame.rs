@@ -12,12 +12,13 @@ use alloc::vec::Vec;
 use crate::battery_state::BatteryState;
 use crate::command::Command;
 use crate::config::{BoardConfigSnapshot, Config, ConfigType};
+use crate::device_info::DeviceInfo;
+use crate::diagnostic::Diagnostic;
 use crate::event::BoardEvent;
 use crate::imu::ImuData;
 use crate::log::LogMessage;
 use crate::power::PowerData;
 use crate::servo::ServoCmdWrapper;
-use crate::system::SystemInfo;
 /// 帧头
 pub const FRAME_HEAD: u8 = 0xAA;
 
@@ -33,12 +34,13 @@ pub enum FrameType {
     // ═══ 上行 (STM32 → PC) ═══
     Imu = 0x01,
     Power = 0x02,
-    // 0x03 保留（原 Thermal，已合并到 System）
+    // 0x03 保留（原 Thermal，已合并到 Diagnostic）
     Config = 0x04,
     Battery = 0x05,
-    System = 0x06,
+    Diagnostic = 0x06,
     Event = 0x07,
     Log = 0x08,
+    DeviceInfo = 0x09,
 
     // ═══ 下行 (PC → STM32) ═══
     CfgWrite = 0x80,
@@ -71,12 +73,13 @@ impl FrameType {
         match v {
             0x01 => Self::Imu,
             0x02 => Self::Power,
-            // 0x03 保留（原 Thermal，已合并到 System）
+            // 0x03 保留（原 Thermal，已合并到 Diagnostic）
             0x04 => Self::Config,
             0x05 => Self::Battery,
-            0x06 => Self::System,
+            0x06 => Self::Diagnostic,
             0x07 => Self::Event,
             0x08 => Self::Log,
+            0x09 => Self::DeviceInfo,
             0x80 => Self::CfgWrite,
             0x81 => Self::CfgQuery,
             0x82 => Self::CfgQueryAll,
@@ -99,9 +102,10 @@ impl FrameType {
             Self::Power => 0x02,
             Self::Config => 0x04,
             Self::Battery => 0x05,
-            Self::System => 0x06,
+            Self::Diagnostic => 0x06,
             Self::Event => 0x07,
             Self::Log => 0x08,
+            Self::DeviceInfo => 0x09,
             Self::CfgWrite => 0x80,
             Self::CfgQuery => 0x81,
             Self::CfgQueryAll => 0x82,
@@ -125,7 +129,8 @@ impl FrameType {
                 | Self::Power
                 | Self::Config
                 | Self::Battery
-                | Self::System
+                | Self::Diagnostic
+                | Self::DeviceInfo
                 | Self::Event
                 | Self::Log
         )
@@ -161,7 +166,8 @@ impl FrameType {
             Self::Power => "Power",
             Self::Config => "Config",
             Self::Battery => "Battery",
-            Self::System => "System",
+            Self::Diagnostic => "Diagnostic",
+            Self::DeviceInfo => "DeviceInfo",
             Self::Event => "Event",
             Self::Log => "Log",
             Self::CfgWrite => "CfgWrite",
@@ -290,7 +296,8 @@ pub enum TypedFrame {
     Power(PowerData),
     Config(BoardConfigSnapshot),
     Battery(BatteryState),
-    System(SystemInfo),
+    Diagnostic(Diagnostic),
+    DeviceInfo(DeviceInfo),
     Event(BoardEvent),
     Log(LogMessage),
 
@@ -322,7 +329,12 @@ impl TypedFrame {
             FrameType::Battery => Ok(TypedFrame::Battery(BatteryState::from_bytes(
                 &frame.payload,
             )?)),
-            FrameType::System => Ok(TypedFrame::System(SystemInfo::from_bytes(&frame.payload)?)),
+            FrameType::Diagnostic => Ok(TypedFrame::Diagnostic(Diagnostic::from_bytes(
+                &frame.payload,
+            )?)),
+            FrameType::DeviceInfo => Ok(TypedFrame::DeviceInfo(DeviceInfo::from_bytes(
+                &frame.payload,
+            )?)),
             FrameType::Event => Ok(TypedFrame::Event(BoardEvent::from_bytes(&frame.payload)?)),
             FrameType::Log => Ok(TypedFrame::Log(LogMessage::from_bytes(&frame.payload)?)),
             FrameType::AckCfgWrite => {
@@ -393,7 +405,8 @@ impl TypedFrame {
             TypedFrame::Power(_) => FrameType::Power,
             TypedFrame::Config(_) => FrameType::Config,
             TypedFrame::Battery(_) => FrameType::Battery,
-            TypedFrame::System(_) => FrameType::System,
+            TypedFrame::Diagnostic(_) => FrameType::Diagnostic,
+            TypedFrame::DeviceInfo(_) => FrameType::DeviceInfo,
             TypedFrame::Event(_) => FrameType::Event,
             TypedFrame::Log(_) => FrameType::Log,
             TypedFrame::AckCfgWrite { .. } => FrameType::AckCfgWrite,
@@ -447,7 +460,8 @@ mod tests {
             FrameType::Power,
             FrameType::Config,
             FrameType::Battery,
-            FrameType::System,
+            FrameType::Diagnostic,
+            FrameType::DeviceInfo,
             FrameType::Event,
             FrameType::Log,
             FrameType::CfgWrite,
@@ -474,7 +488,8 @@ mod tests {
         // 关键线上值（0x03 保留，Config 从 0x04 起）
         assert_eq!(FrameType::Config.as_u8(), 0x04);
         assert_eq!(FrameType::Battery.as_u8(), 0x05);
-        assert_eq!(FrameType::System.as_u8(), 0x06);
+        assert_eq!(FrameType::Diagnostic.as_u8(), 0x06);
+        assert_eq!(FrameType::DeviceInfo.as_u8(), 0x09);
         assert_eq!(FrameType::Event.as_u8(), 0x07);
         assert_eq!(FrameType::Log.as_u8(), 0x08);
     }
@@ -487,7 +502,8 @@ mod tests {
             FrameType::Power,
             FrameType::Config,
             FrameType::Battery,
-            FrameType::System,
+            FrameType::Diagnostic,
+            FrameType::DeviceInfo,
             FrameType::Event,
             FrameType::Log,
             FrameType::CfgWrite,

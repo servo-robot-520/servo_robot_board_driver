@@ -10,14 +10,18 @@ pub mod battery_state;
 pub mod command;
 pub mod config;
 pub mod crc;
+pub mod device_info;
+pub mod diagnostic;
 pub mod error;
 pub mod event;
 pub mod frame;
 pub mod imu;
 pub mod log;
 pub mod power;
-pub mod system;
 pub mod servo;
+
+/// 便捷重导出
+pub use device_info::Version;
 
 /// 通用枚举转换宏
 #[macro_export]

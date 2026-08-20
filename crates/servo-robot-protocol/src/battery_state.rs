@@ -180,7 +180,11 @@ impl BatteryState {
         buf.push(self.technology as u8);
         buf.push(self.present as u8);
         buf.extend_from_slice(&self.serial_number.to_le_bytes());
-        for (v, t) in self.cell_voltages_mv.iter().zip(self.cell_temperatures.iter()) {
+        for (v, t) in self
+            .cell_voltages_mv
+            .iter()
+            .zip(self.cell_temperatures.iter())
+        {
             buf.extend_from_slice(&v.to_le_bytes());
             buf.extend_from_slice(&t.to_le_bytes());
         }
