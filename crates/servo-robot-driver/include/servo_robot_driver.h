@@ -309,6 +309,18 @@ typedef struct {
     const char* msg;
 } sr_log_message;
 
+/// 统一应答结构（替代原多种 Ack 结构体）
+typedef struct {
+    /// RequestKind 值（表示应答哪个请求）
+    uint8_t request_kind;
+    /// 是否成功
+    uint8_t success;
+    /// 附加数据指针（仅回调执行期间有效）
+    const uint8_t* data;
+    /// 附加数据长度
+    size_t data_len;
+} sr_response;
+
 /// 回调表(全 NULL 即可只注册部分;任意时刻可替换)
 ///
 /// 所有回调在驱动分发线程上触发,第一个参数均为注册时传入的 userdata。
@@ -323,12 +335,8 @@ typedef struct {
     void (*on_device_info)(void* userdata, const sr_device_info* info);
     void (*on_diagnostic)(void* userdata, const sr_diagnostic* diag);
     void (*on_log)(void* userdata, const sr_log_message* msg);
-    void (*on_ack_cfg_write)(void* userdata, uint8_t success);
-    void (*on_ack_cfg_query)(void* userdata, const sr_config* config);
-    void (*on_ack_cfg_query_all)(void* userdata, const sr_board_config* config);
-    void (*on_ack_servo_cmd)(void* userdata, const uint8_t* data, size_t len);
-    void (*on_ack_command)(void* userdata, uint8_t success);
-    void (*on_ack_firmware_update)(void* userdata, uint8_t success, uint32_t offset);
+    /// 统一应答回调（替代原 on_ack_cfg_write/on_ack_cfg_query/... 等 6 个回调）
+    void (*on_response)(void* userdata, const sr_response* response);
     void (*on_error)(void* userdata, int error_code);
 } sr_callbacks;
 

@@ -5,19 +5,19 @@
 
 use super::{
     SrBatteryState, SrBoardConfig, SrBoardEvent, SrConfig, SrDeviceInfo, SrDiagnostic, SrImu,
-    SrLogMessage, SrPower, err_code,
+    SrLogMessage, SrPower, SrResponse, err_code,
 };
 use crate::dispatch::callback::DriverCallback;
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
-use crate::protocol::config::{BoardConfigSnapshot, Config};
+use crate::protocol::config::BoardConfigSnapshot;
 use crate::protocol::device_info::DeviceInfo;
 use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::LogMessage;
 use crate::protocol::power::PowerData;
-use crate::protocol::servo::ServoCmdWrapper;
+use crate::protocol::response::Response;
 use std::ffi::{CString, c_void};
 use std::sync::{Arc, Mutex};
 
@@ -37,12 +37,7 @@ pub struct SrCallbacks {
     pub on_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
     pub on_diagnostic: Option<extern "C" fn(*mut c_void, *const SrDiagnostic)>,
     pub on_log: Option<extern "C" fn(*mut c_void, *const SrLogMessage)>,
-    pub on_ack_cfg_write: Option<extern "C" fn(*mut c_void, u8)>,
-    pub on_ack_cfg_query: Option<extern "C" fn(*mut c_void, *const SrConfig)>,
-    pub on_ack_cfg_query_all: Option<extern "C" fn(*mut c_void, *const SrBoardConfig)>,
-    pub on_ack_servo_cmd: Option<extern "C" fn(*mut c_void, *const u8, usize)>,
-    pub on_ack_command: Option<extern "C" fn(*mut c_void, u8)>,
-    pub on_ack_firmware_update: Option<extern "C" fn(*mut c_void, u8, u32)>,
+    pub on_response: Option<extern "C" fn(*mut c_void, *const SrResponse)>,
     pub on_error: Option<extern "C" fn(*mut c_void, i32)>,
 }
 
@@ -233,53 +228,16 @@ impl DriverCallback for CffiCallback {
         });
     }
 
-    fn on_ack_cfg_write(&mut self, success: bool) {
+    fn on_response(&mut self, response: &Response) {
+        let sr = SrResponse {
+            request_kind: response.request_kind as u8,
+            success: response.success as u8,
+            data: response.data.as_ptr(),
+            data_len: response.data.len(),
+        };
         self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_cfg_write {
-                f(cb.userdata, success as u8)
-            }
-        });
-    }
-
-    fn on_ack_cfg_query(&mut self, config: &Config) {
-        let sr = super::to_sr_config(*config);
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_cfg_query {
+            if let Some(f) = cb.on_response {
                 f(cb.userdata, &sr)
-            }
-        });
-    }
-
-    fn on_ack_cfg_query_all(&mut self, config: &BoardConfigSnapshot) {
-        let sr = super::to_sr_board_config(config.clone());
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_cfg_query_all {
-                f(cb.userdata, &sr)
-            }
-        });
-    }
-
-    fn on_ack_servo_cmd(&mut self, cmd: &ServoCmdWrapper) {
-        let data = cmd.data();
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_servo_cmd {
-                f(cb.userdata, data.as_ptr(), data.len())
-            }
-        });
-    }
-
-    fn on_ack_command(&mut self, success: bool) {
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_command {
-                f(cb.userdata, success as u8)
-            }
-        });
-    }
-
-    fn on_ack_firmware_update(&mut self, success: bool, offset: u32) {
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_ack_firmware_update {
-                f(cb.userdata, success as u8, offset)
             }
         });
     }

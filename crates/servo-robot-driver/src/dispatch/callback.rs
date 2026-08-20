@@ -9,14 +9,14 @@
 
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
-use crate::protocol::config::{BoardConfigSnapshot, Config};
+use crate::protocol::config::BoardConfigSnapshot;
 use crate::protocol::device_info::DeviceInfo;
 use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::{LogLevel, LogMessage};
 use crate::protocol::power::PowerData;
-use crate::protocol::servo::ServoCmdWrapper;
+use crate::protocol::response::Response;
 
 /// 回调 trait — 实现感兴趣的回调，其余用默认空实现
 ///
@@ -108,23 +108,11 @@ pub trait DriverCallback: Send + 'static {
         }
     }
 
-    /// 配置写入确认回调
-    fn on_ack_cfg_write(&mut self, _success: bool) {}
-
-    /// 单个配置查询响应回调
-    fn on_ack_cfg_query(&mut self, _config: &Config) {}
-
-    /// 所有配置查询响应回调
-    fn on_ack_cfg_query_all(&mut self, _config: &BoardConfigSnapshot) {}
-
-    /// 舵机命令响应回调
-    fn on_ack_servo_cmd(&mut self, _cmd: &ServoCmdWrapper) {}
-
-    /// 命令确认回调 (Reset/Shutdown/Ota)
-    fn on_ack_command(&mut self, _success: bool) {}
-
-    /// 固件更新确认回调
-    fn on_ack_firmware_update(&mut self, _success: bool, _offset: u32) {}
+    /// 统一应答回调（替代原 6 个 on_ack_* 回调）
+    ///
+    /// `response.request_kind` 表示应答哪个请求，`response.success` 表示是否成功，
+    /// `response.data` 携带附加数据（如 Config、BoardConfigSnapshot、DeviceInfo 等）。
+    fn on_response(&mut self, _response: &Response) {}
 
     fn on_error(&mut self, _error: &DriverError) {}
 }

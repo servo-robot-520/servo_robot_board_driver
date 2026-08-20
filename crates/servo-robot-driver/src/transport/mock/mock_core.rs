@@ -11,7 +11,7 @@
 
 use super::mock_data::*;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
-use crate::protocol::frame::{FrameType, RawFrame};
+use crate::protocol::frame::{FrameType, FromPayload, RawFrame, ToPayload};
 use crate::protocol::log::{LogLevel, LogMessage};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ pub(crate) struct MockCore {
     last_imu: Instant,
     last_power: Instant,
     last_battery: Instant,
-    last_system: Instant,
+    last_diagnostic: Instant,
     last_event: Instant,
     last_log: Instant,
     pub(crate) written_frames: Vec<Vec<u8>>,
@@ -56,7 +56,7 @@ impl MockCore {
             last_imu: now,
             last_power: now,
             last_battery: now,
-            last_system: now,
+            last_diagnostic: now,
             last_event: now,
             last_log: now,
             written_frames: Vec::new(),
@@ -177,28 +177,16 @@ impl MockCore {
             self.last_battery = now;
         }
 
-        // DeviceInfo: 每 60 秒发送一次（静态信息）
-        if !self.device_info.generated
-            || now.duration_since(self.last_system) >= Duration::from_secs(60)
-        {
-            let data = self.device_info.generate();
-            let frame = RawFrame {
-                frame_type: FrameType::DeviceInfo,
-                payload: data.to_bytes(),
-            };
-            self.rx_queue.push_back(frame.encode());
-        }
-
         // Diagnostic 1Hz (1000ms) - 运行时诊断数据
-        if now.duration_since(self.last_system) >= Duration::from_millis(1000) {
-            let dt = now.duration_since(self.last_system).as_secs_f32();
+        if now.duration_since(self.last_diagnostic) >= Duration::from_millis(1000) {
+            let dt = now.duration_since(self.last_diagnostic).as_secs_f32();
             let data = self.diagnostic.generate(dt);
             let frame = RawFrame {
                 frame_type: FrameType::Diagnostic,
                 payload: data.to_bytes(),
             };
             self.rx_queue.push_back(frame.encode());
-            self.last_system = now;
+            self.last_diagnostic = now;
         }
 
         // Event 1Hz (1000ms)
@@ -251,18 +239,31 @@ impl MockCore {
     }
 
     fn handle_write(&mut self, frame: &[u8]) {
+        use crate::protocol::request::{Request, RequestKind};
+        use crate::protocol::response::Response;
+
         if let Ok((raw, _)) = RawFrame::decode(frame) {
-            match raw.frame_type {
-                FrameType::CfgQuery => {
-                    if !raw.payload.is_empty() {
-                        let config_type = ConfigType::from_u8(raw.payload[0]);
+            if raw.frame_type != FrameType::Request {
+                return;
+            }
+            let request = match Request::from_payload(&raw.payload) {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+
+            match request.kind {
+                RequestKind::ConfigQuery => {
+                    if !request.data.is_empty() {
+                        let config_type = ConfigType::from_u8(request.data[0]);
                         if let Some(ct) = config_type {
                             let config = Config::from_type_value(ct, self.get_config_value(ct));
-                            let ack = RawFrame {
-                                frame_type: FrameType::AckCfgQuery,
-                                payload: config.to_bytes(),
+                            let resp =
+                                Response::new(RequestKind::ConfigQuery, true, config.to_bytes());
+                            let frame = RawFrame {
+                                frame_type: FrameType::Response,
+                                payload: resp.to_payload(),
                             };
-                            self.priority_queue.push_back(ack.encode());
+                            self.priority_queue.push_back(frame.encode());
                             self.push_log(
                                 LogLevel::Info,
                                 "config.rs",
@@ -272,12 +273,14 @@ impl MockCore {
                         }
                     }
                 }
-                FrameType::CfgQueryAll => {
-                    let ack = RawFrame {
-                        frame_type: FrameType::AckCfgQueryAll,
-                        payload: self.config.to_bytes(),
+                RequestKind::ConfigQueryAll => {
+                    let resp =
+                        Response::new(RequestKind::ConfigQueryAll, true, self.config.to_bytes());
+                    let frame = RawFrame {
+                        frame_type: FrameType::Response,
+                        payload: resp.to_payload(),
                     };
-                    self.priority_queue.push_back(ack.encode());
+                    self.priority_queue.push_back(frame.encode());
                     self.push_log(
                         LogLevel::Info,
                         "config.rs",
@@ -285,50 +288,67 @@ impl MockCore {
                         "queried all configs",
                     );
                 }
-                FrameType::CfgWrite => {
-                    if let Ok(config) = Config::from_bytes(&raw.payload) {
+                RequestKind::ConfigWrite => {
+                    if let Ok(config) = Config::from_bytes(&request.data) {
                         self.update_config(config);
-                        let ack = RawFrame {
-                            frame_type: FrameType::AckCfgWrite,
-                            payload: vec![1],
+                        let resp = Response::simple(RequestKind::ConfigWrite, true);
+                        let frame = RawFrame {
+                            frame_type: FrameType::Response,
+                            payload: resp.to_payload(),
                         };
-                        self.priority_queue.push_back(ack.encode());
-                        // 发布更新后的全量配置（模拟 STM32 行为）
+                        self.priority_queue.push_back(frame.encode());
                         self.publish_config();
                         self.push_log(
                             LogLevel::Info,
                             "config.rs",
                             "handle_write",
-                            &format!("config updated: {:?}", config),
+                            &format!("config updated"),
                         );
                     }
                 }
-                FrameType::Command => {
-                    // 模拟板级命令执行成功
-                    let ack = RawFrame {
-                        frame_type: FrameType::AckCommand,
-                        payload: vec![1],
+                RequestKind::Reset | RequestKind::Shutdown | RequestKind::Ota => {
+                    let resp = Response::simple(request.kind, true);
+                    let frame = RawFrame {
+                        frame_type: FrameType::Response,
+                        payload: resp.to_payload(),
                     };
-                    self.priority_queue.push_back(ack.encode());
+                    self.priority_queue.push_back(frame.encode());
                     self.push_log(
                         LogLevel::Info,
                         "command.rs",
                         "handle_command",
-                        "command executed",
+                        &format!("{} executed", request.kind),
                     );
                 }
-                FrameType::FirmwareUpdate => {
-                    // 模拟固件写入成功,回带写入 offset 的 ACK
-                    let mut payload = Vec::with_capacity(5);
-                    payload.push(1);
-                    if raw.payload.len() >= 4 {
-                        payload.extend_from_slice(&raw.payload[..4]); // offset
-                    }
-                    let ack = RawFrame {
-                        frame_type: FrameType::AckFirmwareUpdate,
-                        payload,
+                RequestKind::DeviceInfo => {
+                    let info = self.device_info.generate();
+                    let resp = Response::new(RequestKind::DeviceInfo, true, info.to_bytes());
+                    let frame = RawFrame {
+                        frame_type: FrameType::Response,
+                        payload: resp.to_payload(),
                     };
-                    self.priority_queue.push_back(ack.encode());
+                    self.priority_queue.push_back(frame.encode());
+                }
+                RequestKind::ServoForward => {
+                    // Mock: echo back empty servo response
+                    let resp = Response::new(RequestKind::ServoForward, true, Vec::new());
+                    let frame = RawFrame {
+                        frame_type: FrameType::Response,
+                        payload: resp.to_payload(),
+                    };
+                    self.priority_queue.push_back(frame.encode());
+                }
+                RequestKind::FirmwareUpdate => {
+                    let mut data = Vec::with_capacity(4);
+                    if request.data.len() >= 4 {
+                        data.extend_from_slice(&request.data[..4]); // offset
+                    }
+                    let resp = Response::new(RequestKind::FirmwareUpdate, true, data);
+                    let frame = RawFrame {
+                        frame_type: FrameType::Response,
+                        payload: resp.to_payload(),
+                    };
+                    self.priority_queue.push_back(frame.encode());
                     self.push_log(
                         LogLevel::Info,
                         "command.rs",
@@ -336,7 +356,6 @@ impl MockCore {
                         "firmware chunk written",
                     );
                 }
-                _ => {}
             }
         }
     }

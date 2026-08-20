@@ -100,7 +100,9 @@ impl Transport for MockTransport {
 mod tests {
     use super::*;
     use crate::protocol::config::{Config, ConfigType};
-    use crate::protocol::frame::{FrameType, RawFrame};
+    use crate::protocol::frame::{FrameType, FromPayload, RawFrame, ToPayload};
+    use crate::protocol::request::{Request, RequestKind};
+    use crate::protocol::response::Response;
 
     #[test]
     fn test_mock_transport_imu() {
@@ -132,17 +134,22 @@ mod tests {
     fn test_mock_transport_config_query() {
         let mut mock = MockTransport::new();
 
-        let query = RawFrame {
-            frame_type: FrameType::CfgQuery,
-            payload: vec![ConfigType::PowerServoCurrentLimitMa as u8],
+        let query = Request::new(
+            RequestKind::ConfigQuery,
+            vec![ConfigType::PowerServoCurrentLimitMa as u8],
+        );
+        let frame = RawFrame {
+            frame_type: FrameType::Request,
+            payload: query.to_payload(),
         };
-        mock.write_frame(&query.encode()).unwrap();
+        mock.write_frame(&frame.encode()).unwrap();
 
         let response = mock.read_frame().unwrap();
         let (raw, _) = RawFrame::decode(&response).unwrap();
-        assert_eq!(raw.frame_type, FrameType::AckCfgQuery);
+        assert_eq!(raw.frame_type, FrameType::Response);
 
-        let config = Config::from_bytes(&raw.payload).unwrap();
+        let resp = Response::from_payload(&raw.payload).unwrap();
+        let config = Config::from_bytes(&resp.data).unwrap();
         assert_eq!(config.value(), 50.0);
     }
 

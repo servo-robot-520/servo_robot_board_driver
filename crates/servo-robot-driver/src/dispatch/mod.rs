@@ -21,7 +21,6 @@ pub enum DriverEvent {
     // ═══ 上行数据 ═══
     ImuData(crate::protocol::imu::ImuData),
     PowerData(crate::protocol::power::PowerData),
-    // ThermalData 已合并到 Diagnostic
     BatteryState(crate::protocol::battery_state::BatteryState),
     ConfigSnapshot(crate::protocol::config::BoardConfigSnapshot),
     BoardEvent(crate::protocol::event::BoardEvent),
@@ -31,19 +30,7 @@ pub enum DriverEvent {
     Log(u64, crate::protocol::log::LogMessage),
 
     // ═══ 应答事件 ═══
-    AckCfgWrite {
-        success: bool,
-    },
-    AckCfgQuery(crate::protocol::config::Config),
-    AckCfgQueryAll(crate::protocol::config::BoardConfigSnapshot),
-    AckServoCmd(crate::protocol::servo::ServoCmdWrapper),
-    AckCommand {
-        success: bool,
-    },
-    AckFirmwareUpdate {
-        success: bool,
-        offset: u32,
-    },
+    Response(crate::protocol::response::Response),
 
     // ═══ 错误 ═══
     Error(DriverError),
@@ -153,14 +140,7 @@ impl EventBus {
                 DriverEvent::DeviceInfo(d) => cb.on_device_info(d),
                 DriverEvent::Diagnostic(d) => cb.on_diagnostic(d),
                 DriverEvent::Log(ts, d) => cb.on_log(*ts, d),
-                DriverEvent::AckCfgWrite { success } => cb.on_ack_cfg_write(*success),
-                DriverEvent::AckCfgQuery(config) => cb.on_ack_cfg_query(config),
-                DriverEvent::AckCfgQueryAll(config) => cb.on_ack_cfg_query_all(config),
-                DriverEvent::AckServoCmd(cmd) => cb.on_ack_servo_cmd(cmd),
-                DriverEvent::AckCommand { success } => cb.on_ack_command(*success),
-                DriverEvent::AckFirmwareUpdate { success, offset } => {
-                    cb.on_ack_firmware_update(*success, *offset)
-                }
+                DriverEvent::Response(r) => cb.on_response(r),
                 DriverEvent::Error(e) => cb.on_error(e),
             }
         }

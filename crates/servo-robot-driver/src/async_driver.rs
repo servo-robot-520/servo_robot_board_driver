@@ -17,8 +17,8 @@
 use crate::dispatch::callback::DriverCallback;
 use crate::driver::Driver;
 use crate::error::DriverError;
-use crate::protocol::command::Command;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
+use crate::protocol::request::RequestKind;
 use crate::protocol::servo::ServoCmdWrapper;
 use crate::reconnect::ReconnectConfig;
 use crate::state::DriverState;
@@ -128,13 +128,13 @@ impl AsyncDriver {
     }
 
     /// 发送板级命令(不等待应答)
-    pub async fn send_command(&self, cmd: Command) -> Result<(), DriverError> {
-        self.call(move |d| d.send_command(&cmd)).await
+    pub async fn send_command(&self, kind: RequestKind) -> Result<(), DriverError> {
+        self.call(move |d| d.send_command(kind)).await
     }
 
     /// 发送板级命令并等待响应
-    pub async fn send_command_sync(&self, cmd: Command) -> Result<bool, DriverError> {
-        self.call(move |d| d.send_command_sync(&cmd)).await
+    pub async fn send_command_sync(&self, kind: RequestKind) -> Result<bool, DriverError> {
+        self.call(move |d| d.send_command_sync(kind)).await
     }
 
     /// 发送固件更新数据(不等待应答)

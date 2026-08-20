@@ -176,6 +176,20 @@ pub struct SrDiagnostic {
     pub temp_battery: i16,
 }
 
+/// 统一应答结构 — 替代原多种 Ack 结构体
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SrResponse {
+    /// RequestKind 值（表示应答哪个请求）
+    pub request_kind: u8,
+    /// 是否成功
+    pub success: u8,
+    /// 附加数据指针（仅回调期间有效）
+    pub data: *const u8,
+    /// 附加数据长度
+    pub data_len: usize,
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SrLogMessage {

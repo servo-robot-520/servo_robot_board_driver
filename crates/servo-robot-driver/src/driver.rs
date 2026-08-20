@@ -11,8 +11,10 @@ use crate::dispatch::callback::DriverCallback;
 use crate::dispatch::{DriverEvent, EventBus};
 use crate::driver_common;
 use crate::error::DriverError;
-use crate::protocol::command::Command;
 use crate::protocol::config::{BoardConfigSnapshot, Config, ConfigType};
+use crate::protocol::frame::ToPayload;
+use crate::protocol::request::{Request, RequestKind};
+use crate::protocol::response::Response;
 use crate::protocol::servo::ServoCmdWrapper;
 use crate::reconnect::ReconnectConfig;
 use crate::state::DriverState;
@@ -160,7 +162,8 @@ impl Driver {
 
     /// 写入配置到 STM32（不等待应答）
     pub fn write_config(&self, config: Config) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_cfg_write(&config);
+        let request = Request::new(RequestKind::ConfigWrite, config.to_bytes());
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -174,7 +177,8 @@ impl Driver {
 
     /// 查询单个配置（不等待应答）
     pub fn query_config(&self, config_type: ConfigType) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_cfg_query(config_type);
+        let request = Request::new(RequestKind::ConfigQuery, vec![config_type as u8]);
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -188,7 +192,8 @@ impl Driver {
 
     /// 查询所有配置（不等待应答）
     pub fn query_all_configs(&self) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_cfg_query_all();
+        let request = Request::simple(RequestKind::ConfigQueryAll);
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -202,7 +207,8 @@ impl Driver {
 
     /// 转发舵机命令（不等待应答）
     pub fn forward_servo(&self, cmd: &ServoCmdWrapper) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_servo_forward(cmd);
+        let request = Request::new(RequestKind::ServoForward, cmd.to_payload());
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -219,19 +225,28 @@ impl Driver {
     /// 查询单个配置并等待响应
     pub fn query_config_sync(&self, config_type: ConfigType) -> Result<Config, DriverError> {
         self.query_config(config_type)?;
-        self.wait_for_ack_cfg_query(DEFAULT_TIMEOUT)
+        let resp = self.wait_for_response(RequestKind::ConfigQuery, DEFAULT_TIMEOUT)?;
+        Config::from_bytes(&resp.data).map_err(|_| {
+            DriverError::Frame(crate::error::FrameError::PayloadDecode("Config decode"))
+        })
     }
 
     /// 查询所有配置并等待响应
     pub fn query_all_configs_sync(&self) -> Result<BoardConfigSnapshot, DriverError> {
         self.query_all_configs()?;
-        self.wait_for_ack_cfg_query_all(DEFAULT_TIMEOUT)
+        let resp = self.wait_for_response(RequestKind::ConfigQueryAll, DEFAULT_TIMEOUT)?;
+        BoardConfigSnapshot::from_bytes(&resp.data).map_err(|_| {
+            DriverError::Frame(crate::error::FrameError::PayloadDecode(
+                "ConfigSnapshot decode",
+            ))
+        })
     }
 
     /// 写入配置并等待确认
     pub fn write_config_sync(&self, config: Config) -> Result<bool, DriverError> {
         self.write_config(config)?;
-        self.wait_for_ack_cfg_write(DEFAULT_TIMEOUT)
+        self.wait_for_response(RequestKind::ConfigWrite, DEFAULT_TIMEOUT)
+            .map(|r| r.success)
     }
 
     /// 转发舵机命令并等待响应
@@ -240,12 +255,14 @@ impl Driver {
         cmd: &ServoCmdWrapper,
     ) -> Result<ServoCmdWrapper, DriverError> {
         self.forward_servo(cmd)?;
-        self.wait_for_ack_servo_cmd(DEFAULT_TIMEOUT)
+        let resp = self.wait_for_response(RequestKind::ServoForward, DEFAULT_TIMEOUT)?;
+        Ok(ServoCmdWrapper::new(resp.data))
     }
 
-    /// 发送命令（不等待应答）
-    pub fn send_command(&self, cmd: &Command) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_command(cmd);
+    /// 发送系统控制命令（Reset/Shutdown/Ota，不等待应答）
+    pub fn send_command(&self, kind: RequestKind) -> Result<(), DriverError> {
+        let request = Request::simple(kind);
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -257,15 +274,27 @@ impl Driver {
         Ok(())
     }
 
-    /// 发送命令并等待响应
-    pub fn send_command_sync(&self, cmd: &Command) -> Result<bool, DriverError> {
-        self.send_command(cmd)?;
-        self.wait_for_ack_command(DEFAULT_TIMEOUT)
+    /// 发送系统控制命令
+    ///
+    /// 对于 fire-and-forget 命令（Reset/Shutdown/Ota），发送后立即返回 Ok(true)。
+    /// 对于需要应答的命令，等待 Response 并返回 success 状态。
+    pub fn send_command_sync(&self, kind: RequestKind) -> Result<bool, DriverError> {
+        self.send_command(kind)?;
+        if kind.expects_response() {
+            self.wait_for_response(kind, DEFAULT_TIMEOUT)
+                .map(|r| r.success)
+        } else {
+            Ok(true)
+        }
     }
 
     /// 发送固件更新数据（不等待应答）
     pub fn firmware_update(&self, offset: u32, data: &[u8]) -> Result<(), DriverError> {
-        let encoded = driver_common::encode_firmware_update(offset, data);
+        let mut payload = Vec::with_capacity(4 + data.len());
+        payload.extend_from_slice(&offset.to_le_bytes());
+        payload.extend_from_slice(data);
+        let request = Request::new(RequestKind::FirmwareUpdate, payload);
+        let encoded = driver_common::encode_request(&request);
         let mut transport = self
             .transport
             .lock()
@@ -280,29 +309,18 @@ impl Driver {
     /// 发送固件更新数据并等待响应
     pub fn firmware_update_sync(&self, offset: u32, data: &[u8]) -> Result<bool, DriverError> {
         self.firmware_update(offset, data)?;
-        self.wait_for_ack_firmware_update(DEFAULT_TIMEOUT)
+        self.wait_for_response(RequestKind::FirmwareUpdate, DEFAULT_TIMEOUT)
+            .map(|r| r.success)
     }
 
-    // ═══ 等待应答（使用 recv_timeout，不再 busy-poll）═══
+    // ═══ 等待应答 ═══
 
-    fn wait_for_ack_cfg_query(&self, timeout: Duration) -> Result<Config, DriverError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout);
-            }
-            match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckCfgQuery(config) => return Ok(config),
-                _ => continue,
-            }
-        }
-    }
-
-    fn wait_for_ack_cfg_query_all(
+    /// 等待指定 RequestKind 的 Response
+    fn wait_for_response(
         &self,
+        kind: RequestKind,
         timeout: Duration,
-    ) -> Result<BoardConfigSnapshot, DriverError> {
+    ) -> Result<Response, DriverError> {
         let deadline = std::time::Instant::now() + timeout;
         loop {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -310,63 +328,7 @@ impl Driver {
                 return Err(DriverError::Timeout);
             }
             match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckCfgQueryAll(config) => return Ok(config),
-                _ => continue,
-            }
-        }
-    }
-
-    fn wait_for_ack_cfg_write(&self, timeout: Duration) -> Result<bool, DriverError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout);
-            }
-            match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckCfgWrite { success } => return Ok(success),
-                _ => continue,
-            }
-        }
-    }
-
-    fn wait_for_ack_servo_cmd(&self, timeout: Duration) -> Result<ServoCmdWrapper, DriverError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout);
-            }
-            match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckServoCmd(cmd) => return Ok(cmd),
-                _ => continue,
-            }
-        }
-    }
-
-    fn wait_for_ack_command(&self, timeout: Duration) -> Result<bool, DriverError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout);
-            }
-            match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckCommand { success } => return Ok(success),
-                _ => continue,
-            }
-        }
-    }
-
-    fn wait_for_ack_firmware_update(&self, timeout: Duration) -> Result<bool, DriverError> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(DriverError::Timeout);
-            }
-            match self.bus.recv_ack_timeout(remaining)? {
-                DriverEvent::AckFirmwareUpdate { success, .. } => return Ok(success),
+                DriverEvent::Response(resp) if resp.request_kind == kind => return Ok(resp),
                 _ => continue,
             }
         }
@@ -500,16 +462,8 @@ impl Driver {
                 None => continue,
             };
 
-            // 检查是否是 ACK 事件
-            let is_ack = matches!(
-                event,
-                DriverEvent::AckCfgQuery(_)
-                    | DriverEvent::AckCfgQueryAll(_)
-                    | DriverEvent::AckCfgWrite { .. }
-                    | DriverEvent::AckServoCmd(_)
-                    | DriverEvent::AckCommand { .. }
-                    | DriverEvent::AckFirmwareUpdate { .. }
-            );
+            // 检查是否是应答事件
+            let is_ack = matches!(event, DriverEvent::Response(_));
 
             // 发送到主事件通道（bounded，满时丢弃——try_send 不阻塞读线程，
             // 否则慢分发会反向卡死串口读取导致线速下 MCU 侧缓冲溢出）

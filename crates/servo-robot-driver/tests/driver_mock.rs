@@ -360,7 +360,7 @@ fn test_driver_stop_and_restart() {
 
 #[test]
 fn test_driver_auto_reconnect() {
-    use servo_robot_driver::protocol::command::{Command, CommandType};
+    use servo_robot_driver::protocol::request::RequestKind;
     use servo_robot_driver::transport::FnTransportFactory;
     use servo_robot_driver::{ReconnectConfig, Transport};
 
@@ -410,9 +410,7 @@ fn test_driver_auto_reconnect() {
         > before));
 
     // 恢复的实例上命令同步往返正常
-    let ok = driver
-        .send_command_sync(&Command::new(CommandType::Reset))
-        .unwrap();
+    let ok = driver.send_command_sync(RequestKind::Reset).unwrap();
     assert!(ok, "command ACK after reconnect");
 
     driver.stop().unwrap();
@@ -447,19 +445,17 @@ fn test_driver_reconnect_gives_up() {
 
 #[test]
 fn test_driver_command_and_firmware_sync() {
-    use servo_robot_driver::protocol::command::{Command, CommandType};
+    use servo_robot_driver::protocol::request::RequestKind;
 
     let mock = MockTransport::new();
     let mut driver = Driver::new(mock);
     driver.start().unwrap();
 
-    // mock 回 AckCommand{success:true}
-    let ok = driver
-        .send_command_sync(&Command::new(CommandType::Reset))
-        .unwrap();
+    // mock 回 Response(Reset, success=true)
+    let ok = driver.send_command_sync(RequestKind::Reset).unwrap();
     assert!(ok);
 
-    // mock 回 AckFirmwareUpdate{success:true, offset}
+    // mock 回 Response(FirmwareUpdate, success=true)
     let data = vec![0x11u8, 0x22, 0x33, 0x44];
     let ok = driver.firmware_update_sync(0x1000, &data).unwrap();
     assert!(ok, "firmware chunk ACK should succeed");
