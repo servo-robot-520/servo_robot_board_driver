@@ -50,58 +50,11 @@
 
 ## 帧协议
 
-```
-┌──────┬──────┬──────┬───────────────┬──────┐
-│ HEAD │ TYPE │ LEN  │   PAYLOAD     │ CRC  │
-│ 1B   │ 1B   │ 2B   │   0~255B      │ 2B   │
-└──────┴──────┴──────┴───────────────┴──────┘
+`HEAD(0xAA) + TYPE(1B) + LEN(2B LE) + PAYLOAD(0~255B) + CRC16-CCITT(2B)`
 
-HEAD:    0xAA (固定帧头)
-TYPE:    消息类型
-LEN:     payload 长度 (小端 uint16)
-PAYLOAD: 数据内容
-CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
-```
+9 种帧类型（7 上行 + Request + Response），所有下行操作统一为 Request 帧，所有应答统一为 Response 帧。
 
-## 帧类型
-
-### 上行帧（固件主动推送）
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Imu | 0x01 | IMU 惯性测量数据 |
-| Power | 0x02 | 电源电气数据 |
-| Config | 0x04 | 配置快照 |
-| Battery | 0x05 | 电池状态 |
-| Diagnostic | 0x06 | 运行时诊断（CPU/内存/错误计数/温度） |
-| Event | 0x07 | 板级事件 |
-| Log | 0x08 | 日志消息 |
-
-### 下行帧（PC → 固件）
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Request | 0x80 | 统一请求帧，payload 首字节为 RequestKind |
-
-### 应答帧（固件 → PC）
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Response | 0xC0 | 统一应答帧，payload 格式: `[request_kind:1][success:1][data:N]` |
-
-### RequestKind（Request payload 首字节）
-
-| 值 | 名称 | 需要应答 | 说明 |
-|----|------|----------|------|
-| 0x01 | Reset | ❌ | 重启 MCU（fire-and-forget） |
-| 0x02 | Shutdown | ❌ | 关机（fire-and-forget） |
-| 0x03 | Ota | ❌ | 触发 OTA 更新（fire-and-forget） |
-| 0x10 | ConfigWrite | ✅ | 写入单个配置项 |
-| 0x11 | ConfigQuery | ✅ | 查询单个配置项 |
-| 0x12 | ConfigQueryAll | ✅ | 查询所有配置 |
-| 0x13 | DeviceInfo | ✅ | 查询设备标识与内存布局 |
-| 0x20 | ServoForward | ✅ | 转发舵机命令 |
-| 0x21 | FirmwareUpdate | ✅ | 固件更新数据块 |
+详见 [servo-robot-protocol 文档](crates/servo-robot-protocol/README.md#帧类型)。
 
 ## 快速开始
 

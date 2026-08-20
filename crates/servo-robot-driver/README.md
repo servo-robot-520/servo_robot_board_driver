@@ -134,60 +134,11 @@ pub struct EventBus {
 - `FromPayload`: 从字节反序列化
 - `from_bytes()` / `to_bytes()`: 底层字节操作
 
-### 帧格式
+### 帧协议
 
-```
-┌──────┬──────┬──────┬───────────────┬──────┐
-│ HEAD │ TYPE │ LEN  │   PAYLOAD     │ CRC  │
-│ 1B   │ 1B   │ 2B   │   0~255B      │ 2B   │
-└──────┴──────┴──────┴───────────────┴──────┘
+帧格式、帧类型、数据类型的完整定义见 [servo-robot-protocol 文档](../servo-robot-protocol/README.md)。
 
-HEAD:    0xAA (固定帧头)
-TYPE:    消息类型
-LEN:     payload 长度 (小端 uint16)
-PAYLOAD: 数据内容
-CRC:     CRC-16/CCITT 校验 (从 TYPE 到 PAYLOAD 末尾)
-```
-
-### 帧类型
-
-上行数据（STM32 → PC）：
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Imu | 0x01 | IMU 惯性测量数据 |
-| Power | 0x02 | 电源电气数据 |
-| Config | 0x04 | 配置快照 |
-| Battery | 0x05 | 电池状态 |
-| Diagnostic | 0x06 | 运行时诊断（CPU/内存/温度等）|
-| Event | 0x07 | 板级事件 |
-| Log | 0x08 | 日志消息 |
-
-下行请求（PC → STM32）：
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Request | 0x80 | 统一请求帧（`RequestKind` 首字节区分）|
-
-应答（STM32 → PC）：
-
-| 类型 | 值 | 说明 |
-|------|-----|------|
-| Response | 0xC0 | 统一应答帧（`request_kind` + `success` + `data`）|
-
-#### RequestKind
-
-| 变体 | 值 | 说明 | 需要应答 |
-|------|-----|------|---------|
-| Reset | 0x01 | 重启 MCU | 否 |
-| Shutdown | 0x02 | 关机 | 否 |
-| Ota | 0x03 | 触发 OTA 更新 | 否 |
-| ConfigWrite | 0x10 | 写入单个配置 | 是 |
-| ConfigQuery | 0x11 | 查询单个配置 | 是 |
-| ConfigQueryAll | 0x12 | 查询所有配置 | 是 |
-| DeviceInfo | 0x13 | 查询设备标识与内存布局 | 是 |
-| ServoForward | 0x20 | 转发舵机命令 | 是 |
-| FirmwareUpdate | 0x21 | 固件更新数据块 | 是 |
+驱动层负责帧的编解码、传输和状态管理，不重新定义协议类型。
 
 ### 线程模型
 
@@ -353,105 +304,111 @@ let mut driver = Driver::with_reconnect(factory, ReconnectConfig::default());
 driver.start()?;
 ```
 
-### C/C++ FFI 快速开始
+## C/C++ 集成（FFI）
 
-启用 `ffi` feature 后，驱动以 C ABI 暴露 `sr_driver_*` API，头文件位于 `include/servo_robot_driver.h`。
+启用 `ffi` feature 可把驱动编译为共享库（.so），供 C/C++ 直接调用。
 
-```c
-#include "servo_robot_driver.h"
-#include <stdio.h>
+### 编译 .so
 
-// 应答回调
-static void on_response(void *ud, const SrResponse *resp) {
-    printf("Response: kind=%d success=%d\n", resp->request_kind, resp->success);
-}
-
-// IMU 回调
-static void on_imu(void *ud, const SrImu *imu) {
-    printf("IMU: roll=%.1f pitch=%.1f yaw=%.1f\n", imu->roll, imu->pitch, imu->yaw);
-}
-
-// 诊断回调（1Hz 推送）
-static void on_diagnostic(void *ud, const SrDiagnostic *diag) {
-    printf("CPU: %u%% uptime: %us MCU temp: %.1f°C\n",
-           diag->cpu_usage_percent, diag->uptime_s, (float)diag->temp_mcu / 10.0f);
-}
-
-int main(void) {
-    // 查询驱动版本
-    SrVersion ver = sr_driver_version();
-    printf("Driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
-
-    // 打开串口（支持自动重连）
-    char err[256];
-    sr_driver *drv = sr_driver_open_reconnect(
-        "/dev/ttyUSB0", 115200,
-        5,      // max_retries
-        1000,   // retry_interval_ms
-        2.0f,   // backoff_multiplier
-        10000,  // max_retry_interval_ms
-        err, sizeof(err)
-    );
-    if (!drv) {
-        fprintf(stderr, "Open failed: %s\n", err);
-        return 1;
-    }
-
-    // 注册回调
-    sr_callbacks cbs = {
-        .on_imu           = on_imu,
-        .on_diagnostic    = on_diagnostic,
-        .on_response      = on_response,
-    };
-    sr_driver_set_callbacks(drv, &cbs);
-
-    // 启动驱动
-    sr_driver_start(drv);
-
-    // ... 业务逻辑 ...
-
-    // 释放资源
-    sr_driver_free(drv);
-    return 0;
-}
+```bash
+# 仓库根目录;必须带 --features ffi,否则 .so 内没有可调用的 sr_* 符号
+cargo build --release --features ffi
+# 产物: target/release/libservo_robot_driver.so
+nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
 ```
 
-#### FFI 函数一览
+头文件: `include/servo_robot_driver.h`（唯一接口契约,含结构体/枚举/函数声明/线程红线）。
+
+### 一键打包（推荐）
+
+```bash
+crates/servo-robot-driver/ffi/package_ffi.sh [输出目录]
+# 默认输出到仓库根 ffi-dist/:
+#   ffi-dist/
+#   ├── CMakeLists.txt            # 已配置好导入 .so + 示例构建
+#   ├── README.md
+#   ├── include/servo_robot_driver.h
+#   ├── lib/libservo_robot_driver.so
+#   └── examples/cpp_example.cpp, c_example.c
+```
+
+整个 `ffi-dist/` 复制进 C/C++ 项目即可:
+
+```bash
+cd ffi-dist
+cmake -S . -B build && cmake --build build
+./build/cpp_example /dev/ttyUSB0 115200
+```
+
+### 手动集成
+
+```c
+#include "servo_robot_driver.h"   // extern "C" 已包裹,C++ 直接 include
+
+sr_version ver = sr_driver_version();
+printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
+sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
+sr_driver_start(d);
+
+sr_board_config cfg;
+sr_driver_query_all_configs(d, &cfg);        // 同步,阻塞 ≤1s
+sr_driver_write_config_sync(d, (sr_config){.typ = SR_CONFIG_SERVO_BAUD_RATE, .value = 1000000}, &ok);
+
+sr_driver_stop(d);
+sr_driver_free(d);                            // 必须最后调用
+```
+
+```bash
+gcc my_prog.c -I <include 目录> -L target/release -lservo_robot_driver \
+    -Wl,-rpath,$PWD/target/release -o my_prog   # C++ 用 g++ 同理
+```
+
+运行时三选一: 编译时 `-Wl,-rpath` / `LD_LIBRARY_PATH` / 安装到 `/usr/local/lib` + `ldconfig`
+
+### 示例
+
+- **C**: [`ffi/c_example.c`](crates/servo-robot-driver/ffi/c_example.c) — 自由函数回调，完整驱动生命周期
+- **C++**: [`ffi/cpp_example.cpp`](crates/servo-robot-driver/ffi/cpp_example.cpp) — 类内回调（thunk 桥），ROS2 节点风格
+- **冒烟测试**: [`ffi/smoke_test.c`](crates/servo-robot-driver/ffi/smoke_test.c) — ABI 边界验证，非业务示例
+
+### FFI 函数
 
 | 函数 | 说明 |
 |------|------|
-| `sr_driver_version()` | 获取驱动版本号（`SrVersion`）|
-| `sr_driver_open()` | 打开串口，返回句柄 |
-| `sr_driver_open_reconnect()` | 打开串口并启用自动重连 |
+| `sr_driver_version()` | 获取驱动版本号（`sr_version`）|
+| `sr_driver_open()` | 打开串口，返回句柄（不自动重连）|
+| `sr_driver_connect()` | 重新连接指定串口（上层实现重连）|
 | `sr_driver_free()` | 释放句柄（自动 stop + join）|
-| `sr_driver_start()` | 启动驱动（读取线程 + 分发线程）|
-| `sr_driver_stop()` | 停止驱动 |
-| `sr_driver_write_config()` | 写入单个配置 |
-| `sr_driver_write_config_sync()` | 写入配置（同步等待应答）|
-| `sr_driver_query_config()` | 查询单个配置 |
-| `sr_driver_query_all_configs()` | 查询所有配置 |
-| `sr_driver_forward_servo()` | 转发舵机命令 |
-| `sr_driver_forward_servo_sync()` | 转发舵机命令（同步等待应答）|
-| `sr_driver_send_command()` | 发送板级命令（Reset/Shutdown/Ota）|
-| `sr_driver_send_command_sync()` | 发送命令（同步等待确认）|
-| `sr_driver_firmware_update()` | 固件更新数据块 |
-| `sr_driver_firmware_update_sync()` | 固件更新（同步等待确认）|
+| `sr_driver_start()` / `sr_driver_stop()` | 启动/停止驱动 |
+| `sr_driver_write_config()` / `sr_driver_write_config_sync()` | 写入配置（异步/同步）|
+| `sr_driver_query_config()` / `sr_driver_query_all_configs()` | 查询配置 |
+| `sr_driver_forward_servo()` / `sr_driver_forward_servo_sync()` | 舵机命令透传 |
+| `sr_driver_send_command()` / `sr_driver_send_command_sync()` | 板级命令（Reset/Shutdown/Ota）|
+| `sr_driver_firmware_update()` / `sr_driver_firmware_update_sync()` | 固件更新 |
 | `sr_driver_set_callbacks()` | 设置/替换回调表 |
-| `sr_driver_last_error()` | 获取最近一次错误描述 |
+| `sr_driver_last_error()` | 获取最近错误描述 |
 
-#### FFI 回调表
+### FFI 回调
 
-`sr_callbacks` 结构体包含以下可选回调（函数指针，NULL 表示不注册）：
+`sr_callbacks` 中的可选回调（函数指针，NULL 表示不注册）：
 
 | 回调 | 说明 |
 |------|------|
-| `on_imu` | IMU 数据（100Hz）|
-| `on_power` | 电源数据（20Hz）|
-| `on_battery` | 电池状态（10Hz）|
-| `on_config` | 配置快照 |
+| `on_imu_data` | IMU 数据（100Hz）|
+| `on_power_data` | 电源数据（20Hz）|
+| `on_battery_state` | 电池状态（10Hz）|
+| `on_config_snapshot` | 配置快照 |
 | `on_board_event` | 板级事件 |
-| `on_device_info` | 设备标识与内存布局（静态信息，查询后推送）|
+| `on_device_info` | 设备标识与内存布局（查询后推送）|
 | `on_diagnostic` | 运行时诊断（1Hz 推送）|
+| `on_response` | 统一应答 |
 | `on_log` | 板级日志 |
-| `on_response` | 统一应答（替代原多个 `on_ack_*` 回调）|
 | `on_error` | 错误通知 |
+
+### 线程安全红线
+
+- 回调在驱动**分发线程**上触发，回调内**禁止**调用任何 `sr_driver_*`（尤其 `sr_driver_free`，会自死锁）
+- 回调参数指针仅在回调执行期间有效，不要跨调用保存
+- 禁止在其他线程仍使用句柄时调用 `sr_driver_free`（use-after-free）
+- 同步函数阻塞 ≤1s（驱动默认超时）

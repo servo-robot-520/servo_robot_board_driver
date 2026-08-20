@@ -50,58 +50,11 @@ Bidirectional serial communication between host PC and ServoRobotBoard. This rep
 
 ## Frame Protocol
 
-```
-┌──────┬──────┬──────┬───────────────┬──────┐
-│ HEAD │ TYPE │ LEN  │   PAYLOAD     │ CRC  │
-│ 1B   │ 1B   │ 2B   │   0~255B      │ 2B   │
-└──────┴──────┴──────┴───────────────┴──────┘
+`HEAD(0xAA) + TYPE(1B) + LEN(2B LE) + PAYLOAD(0~255B) + CRC16-CCITT(2B)`
 
-HEAD:    0xAA (fixed)
-TYPE:    message type
-LEN:     payload length (little-endian uint16)
-PAYLOAD: data content
-CRC:     CRC-16/CCITT (from TYPE to end of PAYLOAD)
-```
+9 frame types (7 uplink + Request + Response); all downlink operations use a unified Request frame, all responses use a unified Response frame.
 
-## Frame Types
-
-### Uplink Frames (firmware push)
-
-| Type | Value | Description |
-|------|-------|-------------|
-| Imu | 0x01 | IMU inertial measurement data |
-| Power | 0x02 | Power electrical data |
-| Config | 0x04 | Configuration snapshot |
-| Battery | 0x05 | Battery state |
-| Diagnostic | 0x06 | Runtime diagnostics (CPU/memory/error counters/temperatures) |
-| Event | 0x07 | Board events |
-| Log | 0x08 | Log messages |
-
-### Downlink Frames (PC → firmware)
-
-| Type | Value | Description |
-|------|-------|-------------|
-| Request | 0x80 | Unified request frame; first payload byte is RequestKind |
-
-### Response Frames (firmware → PC)
-
-| Type | Value | Description |
-|------|-------|-------------|
-| Response | 0xC0 | Unified response; payload: `[request_kind:1][success:1][data:N]` |
-
-### RequestKind (first byte of Request payload)
-
-| Value | Name | Expects Response | Description |
-|-------|------|------------------|-------------|
-| 0x01 | Reset | No | Reboot MCU (fire-and-forget) |
-| 0x02 | Shutdown | No | Power off (fire-and-forget) |
-| 0x03 | Ota | No | Trigger OTA update (fire-and-forget) |
-| 0x10 | ConfigWrite | Yes | Write single config item |
-| 0x11 | ConfigQuery | Yes | Query single config item |
-| 0x12 | ConfigQueryAll | Yes | Query all configs |
-| 0x13 | DeviceInfo | Yes | Query device identity and memory layout |
-| 0x20 | ServoForward | Yes | Forward servo command |
-| 0x21 | FirmwareUpdate | Yes | Firmware update data block |
+See [servo-robot-protocol docs](crates/servo-robot-protocol/README_en.md#frame-types).
 
 ## Quick Start
 

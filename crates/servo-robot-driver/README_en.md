@@ -128,52 +128,11 @@ Each data type implements:
 - `FromPayload`: Deserialize from bytes
 - `from_bytes()` / `to_bytes()`: Low-level byte operations
 
-### Frame Format
+### Frame Protocol
 
-```
-┌──────┬──────┬──────┬───────────────┬──────┐
-│ HEAD │ TYPE │ LEN  │   PAYLOAD     │ CRC  │
-│ 1B   │ 1B   │ 2B   │   0~255B      │ 2B   │
-└──────┴──────┴──────┴───────────────┴──────┘
+Frame format, frame types, and data type definitions are documented in [servo-robot-protocol](../servo-robot-protocol/README_en.md).
 
-HEAD:    0xAA (fixed header)
-TYPE:    Message type
-LEN:     Payload length (little-endian uint16)
-PAYLOAD: Data content
-CRC:     CRC-16/CCITT checksum (from TYPE to end of PAYLOAD)
-```
-
-### Frame Types
-
-> **Note**: `0x03` is reserved (old Thermal, merged into Diagnostic).
-
-| Type | Value | Direction | Description |
-|------|-------|-----------|-------------|
-| Imu | 0x01 | Uplink | IMU inertial measurement data |
-| Power | 0x02 | Uplink | Power electrical data |
-| Config | 0x04 | Uplink | Config snapshot |
-| Battery | 0x05 | Uplink | Battery state |
-| Diagnostic | 0x06 | Uplink | Runtime diagnostic (CPU, memory, temps, errors) |
-| Event | 0x07 | Uplink | Event |
-| Log | 0x08 | Uplink | Log message |
-| Request | 0x80 | Downlink | Unified request (RequestKind byte selects operation) |
-| Response | 0xC0 | Response | Unified response ([request_kind:1][success:1][data:N]) |
-
-### Request Types (RequestKind)
-
-All downlink operations use a single `Request` frame (0x80). The first payload byte (`RequestKind`) selects the operation:
-
-| RequestKind | Value | Description | Expects Response |
-|-------------|-------|-------------|------------------|
-| Reset | 0x01 | Reboot MCU | No (fire-and-forget) |
-| Shutdown | 0x02 | Power off | No (fire-and-forget) |
-| Ota | 0x03 | Trigger OTA update | No (fire-and-forget) |
-| ConfigWrite | 0x10 | Write single config item | Yes |
-| ConfigQuery | 0x11 | Query single config item | Yes |
-| ConfigQueryAll | 0x12 | Query all configs | Yes |
-| DeviceInfo | 0x13 | Query static device info | Yes |
-| ServoForward | 0x20 | Forward servo command | Yes |
-| FirmwareUpdate | 0x21 | Firmware data chunk for OTA | Yes |
+The driver layer handles frame encoding/decoding, transport, and state management; it does not redefine protocol types.
 
 ### Threading Model
 
@@ -489,12 +448,12 @@ let success = driver.write_config_sync(Config::PowerServoCurrentLimit(5.0))?;
 
 ## C/C++ Integration (FFI)
 
-Enable the `ffi` feature to compile the driver into a shared library (`.so`) callable from C/C++.
+Enable the `ffi` feature to compile the driver into a shared library (`.so`) for C/C++.
 
 ### Build the .so
 
 ```bash
-# From the repo root; --features ffi is required, otherwise the .so exports no sr_* symbols
+# From the repo root; --features ffi is required, otherwise .so has no sr_* symbols
 cargo build --release --features ffi
 # Output: target/release/libservo_robot_driver.so
 nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_driver_'
@@ -502,20 +461,11 @@ nm -D --defined-only target/release/libservo_robot_driver.so | grep ' T sr_drive
 
 Header: `include/servo_robot_driver.h` (single interface contract: structs, enums, function declarations, threading red lines).
 
-### Driver Version
-
-```c
-#include "servo_robot_driver.h"
-
-sr_version ver = sr_driver_version();
-printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
-```
-
 ### One-shot Packaging (Recommended)
 
 ```bash
 crates/servo-robot-driver/ffi/package_ffi.sh [output_dir]
-# Default output at the repo root ffi-dist/:
+# Default output at repo root ffi-dist/:
 #   ffi-dist/
 #   ├── CMakeLists.txt            # pre-configured: imports .so + builds examples
 #   ├── README.md
@@ -537,6 +487,9 @@ cmake -S . -B build && cmake --build build
 ```c
 #include "servo_robot_driver.h"   // extern "C" guarded, safe to include from C++
 
+sr_version ver = sr_driver_version();
+printf("driver version: %u.%u.%u\n", ver.major, ver.minor, ver.patch);
+
 sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
 sr_driver_start(d);
 
@@ -550,86 +503,57 @@ sr_driver_free(d);                            // must be called last
 
 ```bash
 gcc my_prog.c -I <include dir> -L target/release -lservo_robot_driver \
-    -Wl,-rpath,$PWD/target/release -o my_prog   # or g++ for C++
+    -Wl,-rpath,$PWD/target/release -o my_prog   # g++ for C++
 ```
 
 Runtime options (pick one): `-Wl,-rpath` at link time / `LD_LIBRARY_PATH` / install to `/usr/local/lib` + `ldconfig`.
 
-### FFI Callback Example (C)
+### Examples
 
-```c
-#include "servo_robot_driver.h"
+- **C**: [`ffi/c_example.c`](crates/servo-robot-driver/ffi/c_example.c) — free-function callbacks, full driver lifecycle
+- **C++**: [`ffi/cpp_example.cpp`](crates/servo-robot-driver/ffi/cpp_example.cpp) — class-based callbacks (thunk bridge), ROS2 node style
+- **Smoke test**: [`ffi/smoke_test.c`](crates/servo-robot-driver/ffi/smoke_test.c) — ABI boundary validation, not a business example
 
-typedef struct {
-    uint64_t response_count;
-} my_ctx;
+### FFI Functions
 
-static void on_response(void* userdata, const sr_response* resp) {
-    my_ctx* ctx = (my_ctx*)userdata;
-    ctx->response_count++;
-    printf("[RESP] kind=%u success=%u data_len=%zu\n",
-           resp->request_kind, resp->success, resp->data_len);
-}
+| Function | Description |
+|----------|-------------|
+| `sr_driver_version()` | Get driver version (`sr_version`) |
+| `sr_driver_open()` | Open serial port, return handle (no auto-reconnect) |
+| `sr_driver_connect()` | Reconnect to a different port (upper layer manages reconnect) |
+| `sr_driver_free()` | Release handle (auto stop + join) |
+| `sr_driver_start()` / `sr_driver_stop()` | Start/stop driver |
+| `sr_driver_write_config()` / `sr_driver_write_config_sync()` | Write config (async/sync) |
+| `sr_driver_query_config()` / `sr_driver_query_all_configs()` | Query config |
+| `sr_driver_forward_servo()` / `sr_driver_forward_servo_sync()` | Forward servo command |
+| `sr_driver_send_command()` / `sr_driver_send_command_sync()` | Board command (Reset/Shutdown/Ota) |
+| `sr_driver_firmware_update()` / `sr_driver_firmware_update_sync()` | Firmware update |
+| `sr_driver_set_callbacks()` | Set/replace callback table |
+| `sr_driver_last_error()` | Get last error description |
 
-int main(void) {
-    char err[256];
-    sr_driver* d = sr_driver_open("/dev/ttyUSB0", 115200, err, sizeof err);
+### FFI Callbacks
 
-    my_ctx ctx = {0};
-    sr_callbacks cbs;
-    memset(&cbs, 0, sizeof cbs);
-    cbs.userdata = &ctx;
-    cbs.on_response = on_response;
-    sr_driver_set_callbacks(d, &cbs);
-    sr_driver_start(d);
+Optional callbacks in `sr_callbacks` (NULL = not registered):
 
-    // ...
+| Callback | Description |
+|----------|-------------|
+| `on_imu_data` | IMU data (100Hz) |
+| `on_power_data` | Power data (20Hz) |
+| `on_battery_state` | Battery state (10Hz) |
+| `on_config_snapshot` | Config snapshot |
+| `on_board_event` | Board event |
+| `on_device_info` | Device identity & memory layout (query response) |
+| `on_diagnostic` | Runtime diagnostics (1Hz push) |
+| `on_response` | Unified response |
+| `on_log` | Board log |
+| `on_error` | Error notification |
 
-    sr_driver_stop(d);
-    sr_driver_free(d);
-}
-```
+### Threading Red Lines
 
-### FFI Callback Example (C++, Class-based)
-
-```cpp
-#include "servo_robot_driver.h"
-#include <functional>
-#include <cstdio>
-
-struct CallbackCtx {
-    std::function<void(const sr_response*)> on_response;
-    std::function<void(const sr_imu*)> on_imu;
-};
-
-extern "C" {
-void response_thunk(void* u, const sr_response* r) {
-    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_response) c->on_response(r);
-}
-void imu_thunk(void* u, const sr_imu* d) {
-    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_imu) c->on_imu(d);
-}
-} // extern "C"
-
-// Usage in a class (ROS2 node style):
-//   CallbackCtx ctx_;
-//   ctx_.on_response = [this](const sr_response* r) { handle_response(r); };
-//   ctx_.on_imu      = [this](const sr_imu* d)      { publish_imu(d); };
-//   sr_callbacks cbs = {};
-//   cbs.userdata = &ctx_;
-//   cbs.on_response = response_thunk;
-//   cbs.on_imu_data = imu_thunk;
-//   sr_driver_set_callbacks(driver_, &cbs);
-```
-
-### Red Lines
-
-- Callbacks run on the driver's **dispatch thread**; never call any `sr_driver_*` from inside a callback (especially `sr_driver_free` — self-deadlock)
+- Callbacks fire on the driver's **dispatch thread**; never call any `sr_driver_*` from a callback (especially `sr_driver_free` — self-deadlock)
 - Callback argument pointers are valid only during the callback
-- Never `sr_driver_free` while other threads are still using the handle (use-after-free)
+- Never `sr_driver_free` while other threads still use the handle (use-after-free)
 - Sync functions block ≤1s (driver default timeout)
-
-Full examples: `ffi/c_example.c` (C, free-function callbacks) and `ffi/cpp_example.cpp` (C++, class-based callbacks, ROS2-node style); `ffi/smoke_test.c` is an internal test, not an example.
 
 ## Feature Flags
 
