@@ -7,7 +7,6 @@
 extern crate alloc;
 
 pub mod battery_state;
-pub mod command;
 pub mod config;
 pub mod crc;
 pub mod device_info;
@@ -18,10 +17,14 @@ pub mod frame;
 pub mod imu;
 pub mod log;
 pub mod power;
+pub mod request;
+pub mod response;
 pub mod servo;
 
 /// 便捷重导出
 pub use device_info::Version;
+pub use request::{Request, RequestKind};
+pub use response::Response;
 
 /// 通用枚举转换宏
 #[macro_export]
