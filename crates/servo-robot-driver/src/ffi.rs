@@ -173,20 +173,6 @@ pub struct SrDiagnostic {
     pub temp_battery: i16,
 }
 
-/// 统一应答结构 — 替代原多种 Ack 结构体
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct SrResponse {
-    /// RequestKind 值（表示应答哪个请求）
-    pub request_kind: u8,
-    /// 是否成功
-    pub success: u8,
-    /// 附加数据指针（仅回调期间有效）
-    pub data: *const u8,
-    /// 附加数据长度
-    pub data_len: usize,
-}
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SrLogMessage {
@@ -293,6 +279,22 @@ fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
         charge_temp_limit: c.charge_temp_limit,
         charge_stop_voltage_mv: c.charge_stop_voltage_mv,
         servo_baud_rate: c.servo_baud_rate,
+    }
+}
+
+fn to_sr_device_info(d: DeviceInfo) -> SrDeviceInfo {
+    SrDeviceInfo {
+        device_id: info.device_id,
+        uid: info.uid,
+        imu_id: info.imu_id,
+        fw_major: info.firmware_version.major,
+        fw_minor: info.firmware_version.minor,
+        fw_patch: info.firmware_version.patch,
+        ram_kb: info.ram_kb,
+        flash_boot_kb: info.flash_boot_kb,
+        flash_app_kb: info.flash_app_kb,
+        flash_ota_kb: info.flash_ota_kb,
+        flash_user_kb: info.flash_user_kb,
     }
 }
 
@@ -478,6 +480,25 @@ pub extern "C" fn sr_driver_query_all_configs(d: *mut SrDriver, out: *mut SrBoar
     guard(d, |d| {
         let snap = d.query_all_configs_sync()?;
         unsafe { *out = to_sr_board_config(snap) }
+        Ok(())
+    })
+}
+
+/// 查询设备信息（同步，阻塞 ≤1s）
+///
+/// @param d   句柄
+/// @param out [out] 设备信息
+/// @return SR_OK 成功;SR_ERR_TIMEOUT 超时;其他见 sr_error_code
+#[unsafe(no_mangle)]
+pub extern "C" fn sr_driver_query_device_info(d: *mut SrDriver, out: *mut SrDeviceInfo) -> i32 {
+    if out.is_null() {
+        return SR_ERR_NULL;
+    }
+    guard(d, |d| {
+        let info = d.query_device_info_sync()?;
+        unsafe {
+            *out = to_sr_device_info(info);
+        }
         Ok(())
     })
 }

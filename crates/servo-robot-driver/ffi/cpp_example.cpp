@@ -65,7 +65,6 @@ struct CallbackCtx {
     std::function<void(const sr_imu*)> on_imu;
     std::function<void(const sr_power*)> on_power;
     std::function<void(const sr_battery_state*)> on_battery;
-    std::function<void(const sr_device_info*)> on_device_info;
     std::function<void(const sr_diagnostic*)> on_diagnostic;
     std::function<void(const sr_response*)> on_response;
     std::function<void(const sr_log_message*)> on_log;
@@ -81,9 +80,6 @@ void power_thunk(void* u, const sr_power* d) {
 }
 void battery_thunk(void* u, const sr_battery_state* d) {
     if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_battery) c->on_battery(d);
-}
-void device_info_thunk(void* u, const sr_device_info* d) {
-    if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_device_info) c->on_device_info(d);
 }
 void diagnostic_thunk(void* u, const sr_diagnostic* d) {
     if (auto* c = static_cast<CallbackCtx*>(u); c && c->on_diagnostic) c->on_diagnostic(d);
@@ -128,7 +124,6 @@ public:
         ctx_.on_imu = [this](const sr_imu* d) { onImu(d); };
         ctx_.on_power = [this](const sr_power* d) { onPower(d); };
         ctx_.on_battery = [this](const sr_battery_state* d) { onBattery(d); };
-        ctx_.on_device_info = [this](const sr_device_info* d) { onDeviceInfo(d); };
         ctx_.on_diagnostic = [this](const sr_diagnostic* d) { onDiagnostic(d); };
         ctx_.on_response = [this](const sr_response* r) { onResponse(r); };
         ctx_.on_log = [this](const sr_log_message* d) { onLog(d); };
@@ -139,7 +134,6 @@ public:
         cbs.on_imu_data = imu_thunk;
         cbs.on_power_data = power_thunk;
         cbs.on_battery_state = battery_thunk;
-        cbs.on_device_info = device_info_thunk;
         cbs.on_diagnostic = diagnostic_thunk;
         cbs.on_response = response_thunk;
         cbs.on_log = log_thunk;
@@ -212,15 +206,6 @@ private:
                         state->percentage, state->temperature / 10,
                         state->temperature % 10, (unsigned)state->cell_count);
         }
-    }
-
-    void onDeviceInfo(const sr_device_info* info) {
-        std::printf("[DEVICE] id=0x%04x uid=0x%08x fw=%u.%u.%u "
-                    "ram=%uKB flash:boot=%u app=%u ota=%u user=%uKB\n",
-                    info->device_id, info->uid,
-                    info->fw_major, info->fw_minor, info->fw_patch,
-                    info->ram_kb, info->flash_boot_kb, info->flash_app_kb,
-                    info->flash_ota_kb, info->flash_user_kb);
     }
 
     void onDiagnostic(const sr_diagnostic* diag) {

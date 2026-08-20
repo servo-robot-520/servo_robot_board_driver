@@ -4,20 +4,20 @@
 //! 且回调内禁止调用任何 `sr_driver_*` 函数(尤其 `sr_driver_free`,会自死锁)。
 
 use super::{
-    SrBatteryState, SrBoardConfig, SrBoardEvent, SrDeviceInfo, SrDiagnostic, SrImu, SrLogMessage,
-    SrPower, SrResponse, err_code,
+    SrBatteryState, SrBoardConfig, SrBoardEvent, SrConfig, SrDeviceInfo, SrDiagnostic, SrImu,
+    SrLogMessage, SrPower, err_code,
 };
 use crate::dispatch::callback::DriverCallback;
 use crate::error::DriverError;
 use crate::protocol::battery_state::BatteryState;
-use crate::protocol::config::BoardConfigSnapshot;
+use crate::protocol::config::{BoardConfigSnapshot, Config};
 use crate::protocol::device_info::DeviceInfo;
 use crate::protocol::diagnostic::Diagnostic;
 use crate::protocol::event::BoardEvent;
 use crate::protocol::imu::ImuData;
 use crate::protocol::log::LogMessage;
 use crate::protocol::power::PowerData;
-use crate::protocol::response::Response;
+use crate::protocol::servo::ServoCmdWrapper;
 use std::ffi::{CString, c_void};
 use std::sync::{Arc, Mutex};
 
@@ -34,10 +34,16 @@ pub struct SrCallbacks {
     pub on_battery_state: Option<extern "C" fn(*mut c_void, *const SrBatteryState)>,
     pub on_config_snapshot: Option<extern "C" fn(*mut c_void, *const SrBoardConfig)>,
     pub on_board_event: Option<extern "C" fn(*mut c_void, *const SrBoardEvent)>,
-    pub on_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
     pub on_diagnostic: Option<extern "C" fn(*mut c_void, *const SrDiagnostic)>,
     pub on_log: Option<extern "C" fn(*mut c_void, *const SrLogMessage)>,
-    pub on_response: Option<extern "C" fn(*mut c_void, *const SrResponse)>,
+    // 具体应答回调（on_response 默认实现自动分解后调用）
+    pub on_device_info: Option<extern "C" fn(*mut c_void, *const SrDeviceInfo)>,
+    pub on_ack_cfg_write: Option<extern "C" fn(*mut c_void, u8)>,
+    pub on_ack_cfg_query: Option<extern "C" fn(*mut c_void, *const SrConfig)>,
+    pub on_ack_cfg_query_all: Option<extern "C" fn(*mut c_void, *const SrBoardConfig)>,
+    pub on_ack_servo_cmd: Option<extern "C" fn(*mut c_void, *const u8, usize)>,
+    pub on_ack_command: Option<extern "C" fn(*mut c_void, u8)>,
+    pub on_ack_firmware_update: Option<extern "C" fn(*mut c_void, u8, u32)>,
     pub on_error: Option<extern "C" fn(*mut c_void, i32)>,
 }
 
@@ -163,27 +169,6 @@ impl DriverCallback for CffiCallback {
         });
     }
 
-    fn on_device_info(&mut self, info: &DeviceInfo) {
-        let sr = SrDeviceInfo {
-            device_id: info.device_id,
-            uid: info.uid,
-            imu_id: info.imu_id,
-            fw_major: info.firmware_version.major,
-            fw_minor: info.firmware_version.minor,
-            fw_patch: info.firmware_version.patch,
-            ram_kb: info.ram_kb,
-            flash_boot_kb: info.flash_boot_kb,
-            flash_app_kb: info.flash_app_kb,
-            flash_ota_kb: info.flash_ota_kb,
-            flash_user_kb: info.flash_user_kb,
-        };
-        self.with_table(|cb| {
-            if let Some(f) = cb.on_device_info {
-                f(cb.userdata, &sr)
-            }
-        });
-    }
-
     fn on_diagnostic(&mut self, diag: &Diagnostic) {
         let sr = SrDiagnostic {
             uptime_s: diag.uptime_s,
@@ -228,16 +213,62 @@ impl DriverCallback for CffiCallback {
         });
     }
 
-    fn on_response(&mut self, response: &Response) {
-        let sr = SrResponse {
-            request_kind: response.request_kind as u8,
-            success: response.success as u8,
-            data: response.data.as_ptr(),
-            data_len: response.data.len(),
-        };
+    fn on_ack_device_info(&mut self, info: &DeviceInfo) {
+        let sr = super::to_sr_device_info(*info);
         self.with_table(|cb| {
-            if let Some(f) = cb.on_response {
+            if let Some(f) = cb.on_device_info {
                 f(cb.userdata, &sr)
+            }
+        });
+    }
+
+    fn on_ack_cfg_write(&mut self, success: bool) {
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_cfg_write {
+                f(cb.userdata, success as u8)
+            }
+        });
+    }
+
+    fn on_ack_cfg_query(&mut self, config: &Config) {
+        let sr = super::to_sr_config(*config);
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_cfg_query {
+                f(cb.userdata, &sr)
+            }
+        });
+    }
+
+    fn on_ack_cfg_query_all(&mut self, config: &BoardConfigSnapshot) {
+        let sr = super::to_sr_board_config(config.clone());
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_cfg_query_all {
+                f(cb.userdata, &sr)
+            }
+        });
+    }
+
+    fn on_ack_servo_cmd(&mut self, cmd: &ServoCmdWrapper) {
+        let data = cmd.data();
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_servo_cmd {
+                f(cb.userdata, data.as_ptr(), data.len())
+            }
+        });
+    }
+
+    fn on_ack_command(&mut self, success: bool) {
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_command {
+                f(cb.userdata, success as u8)
+            }
+        });
+    }
+
+    fn on_ack_firmware_update(&mut self, success: bool, offset: u32) {
+        self.with_table(|cb| {
+            if let Some(f) = cb.on_ack_firmware_update {
+                f(cb.userdata, success as u8, offset)
             }
         });
     }

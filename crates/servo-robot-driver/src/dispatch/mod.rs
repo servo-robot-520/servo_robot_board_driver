@@ -24,7 +24,6 @@ pub enum DriverEvent {
     BatteryState(crate::protocol::battery_state::BatteryState),
     ConfigSnapshot(crate::protocol::config::BoardConfigSnapshot),
     BoardEvent(crate::protocol::event::BoardEvent),
-    DeviceInfo(crate::protocol::device_info::DeviceInfo),
     Diagnostic(crate::protocol::diagnostic::Diagnostic),
     /// 日志事件 (时间戳: Unix 毫秒, 日志内容)
     Log(u64, crate::protocol::log::LogMessage),
@@ -137,7 +136,6 @@ impl EventBus {
                 DriverEvent::BatteryState(d) => cb.on_battery_state(d),
                 DriverEvent::ConfigSnapshot(d) => cb.on_config_snapshot(d),
                 DriverEvent::BoardEvent(d) => cb.on_board_event(d),
-                DriverEvent::DeviceInfo(d) => cb.on_device_info(d),
                 DriverEvent::Diagnostic(d) => cb.on_diagnostic(d),
                 DriverEvent::Log(ts, d) => cb.on_log(*ts, d),
                 DriverEvent::Response(r) => cb.on_response(r),

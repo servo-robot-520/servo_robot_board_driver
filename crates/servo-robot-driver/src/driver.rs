@@ -240,6 +240,21 @@ impl Driver {
         Ok(())
     }
 
+    /// 查询设备信息（不等待应答）
+    pub fn query_device_info(&self) -> Result<(), DriverError> {
+        let request = Request::simple(RequestKind::DeviceInfo);
+        let encoded = driver_common::encode_request(&request);
+        let mut transport = self
+            .transport
+            .lock()
+            .map_err(|_| DriverError::LockPoisoned)?;
+        match transport.as_mut() {
+            Some(t) => t.write_frame(&encoded)?,
+            None => return Err(DriverError::TransportClosed),
+        }
+        Ok(())
+    }
+
     /// 转发舵机命令（不等待应答）
     pub fn forward_servo(&self, cmd: &ServoCmdWrapper) -> Result<(), DriverError> {
         let request = Request::new(RequestKind::ServoForward, cmd.to_payload());
@@ -274,6 +289,17 @@ impl Driver {
             DriverError::Frame(crate::error::FrameError::PayloadDecode(
                 "ConfigSnapshot decode",
             ))
+        })
+    }
+
+    /// 查询设备信息并等待响应
+    pub fn query_device_info_sync(
+        &self,
+    ) -> Result<crate::protocol::device_info::DeviceInfo, DriverError> {
+        self.query_device_info()?;
+        let resp = self.wait_for_response(RequestKind::DeviceInfo, DEFAULT_TIMEOUT)?;
+        crate::protocol::device_info::DeviceInfo::from_bytes(&resp.data).map_err(|_| {
+            DriverError::Frame(crate::error::FrameError::PayloadDecode("DeviceInfo decode"))
         })
     }
 

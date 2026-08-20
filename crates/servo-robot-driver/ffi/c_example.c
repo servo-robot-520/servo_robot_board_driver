@@ -60,16 +60,6 @@ static void on_battery(void* userdata, const sr_battery_state* state) {
     }
 }
 
-static void on_device_info(void* userdata, const sr_device_info* info) {
-    (void)userdata;
-    printf("[DEVICE] id=0x%04x uid=0x%08x imu=0x%02x fw=%u.%u.%u "
-           "ram=%uKB flash:boot=%u app=%u ota=%u user=%uKB\n",
-           info->device_id, info->uid, info->imu_id,
-           info->fw_major, info->fw_minor, info->fw_patch,
-           info->ram_kb, info->flash_boot_kb, info->flash_app_kb,
-           info->flash_ota_kb, info->flash_user_kb);
-}
-
 static void on_diagnostic(void* userdata, const sr_diagnostic* diag) {
     callback_ctx* ctx = (callback_ctx*)userdata;
     ctx->diagnostic_count++;
@@ -143,7 +133,6 @@ int main(int argc, char** argv) {
     cbs.on_imu_data = on_imu;
     cbs.on_power_data = on_power;
     cbs.on_battery_state = on_battery;
-    cbs.on_device_info = on_device_info;
     cbs.on_diagnostic = on_diagnostic;
     cbs.on_response = on_response;
     cbs.on_log = on_log;

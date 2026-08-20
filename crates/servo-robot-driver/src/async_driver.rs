@@ -105,6 +105,10 @@ impl AsyncDriver {
         self.call(|d| d.query_all_configs()).await
     }
 
+    pub async fn query_device_info(&self) -> Result<(), DriverError> {
+        self.call(|d| d.query_device_info()).await
+    }
+
     /// 转发舵机命令(不等待应答)
     pub async fn forward_servo(&self, cmd: ServoCmdWrapper) -> Result<(), DriverError> {
         self.call(move |d| d.forward_servo(&cmd)).await
