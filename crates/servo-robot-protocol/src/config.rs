@@ -317,9 +317,9 @@ pub struct BoardConfigSnapshot {
     /// Servo power supply current limit (mA)
     pub servo_current_limit_ma: u16,
     /// Servo power supply temperature limit (×10)
-    pub servo_temp_limit: u16,
+    pub power_servo_temp_limit: u16,
     /// 5V power temperature limit (×10)
-    pub temp_5v_limit: u16,
+    pub power_5v_temp_limit: u16,
     /// Maximum charging current (mA)
     pub charge_max_current_ma: u16,
     /// Charging temperature derating threshold (×10)
@@ -345,8 +345,8 @@ impl Default for BoardConfigSnapshot {
             tx_log_level: LogLevel::Info,
             // Limits
             servo_current_limit_ma: 50,
-            servo_temp_limit: 800,
-            temp_5v_limit: 700,
+            power_servo_temp_limit: 800,
+            power_5v_temp_limit: 700,
             charge_max_current_ma: 90,
             charge_temp_derating: 600,
             charge_temp_limit: 700,
@@ -388,9 +388,9 @@ impl BoardConfigSnapshot {
         // === Limits (0x30~0x37) ===
         let servo_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
-        let servo_temp_limit = u16::from_le_bytes([data[o], data[o + 1]]);
+        let power_servo_temp_limit = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
-        let temp_5v_limit = u16::from_le_bytes([data[o], data[o + 1]]);
+        let power_5v_temp_limit = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
         let charge_max_current_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
@@ -411,8 +411,8 @@ impl BoardConfigSnapshot {
             charge_stop_percentage,
             tx_log_level,
             servo_current_limit_ma,
-            servo_temp_limit,
-            temp_5v_limit,
+            power_servo_temp_limit,
+            power_5v_temp_limit,
             charge_max_current_ma,
             charge_temp_derating,
             charge_temp_limit,
@@ -436,8 +436,8 @@ impl BoardConfigSnapshot {
 
         // === Limits (0x30~0x37) ===
         buf.extend_from_slice(&self.servo_current_limit_ma.to_le_bytes());
-        buf.extend_from_slice(&self.servo_temp_limit.to_le_bytes());
-        buf.extend_from_slice(&self.temp_5v_limit.to_le_bytes());
+        buf.extend_from_slice(&self.power_servo_temp_limit.to_le_bytes());
+        buf.extend_from_slice(&self.power_5v_temp_limit.to_le_bytes());
         buf.extend_from_slice(&self.charge_max_current_ma.to_le_bytes());
         buf.extend_from_slice(&self.charge_temp_derating.to_le_bytes());
         buf.extend_from_slice(&self.charge_temp_limit.to_le_bytes());
@@ -476,8 +476,8 @@ impl core::fmt::Display for BoardConfigSnapshot {
             },
             self.tx_log_level as u8,
             self.servo_current_limit_ma,
-            self.servo_temp_limit as f32 / 10.0,
-            self.temp_5v_limit as f32 / 10.0,
+            self.power_servo_temp_limit as f32 / 10.0,
+            self.power_5v_temp_limit as f32 / 10.0,
             self.charge_max_current_ma,
             self.charge_temp_derating as f32 / 10.0,
             self.charge_temp_limit as f32 / 10.0,
@@ -538,8 +538,8 @@ mod tests {
             config.servo_current_limit_ma,
             decoded.servo_current_limit_ma
         );
-        assert_eq!(config.servo_temp_limit, decoded.servo_temp_limit);
-        assert_eq!(config.temp_5v_limit, decoded.temp_5v_limit);
+        assert_eq!(config.power_servo_temp_limit, decoded.power_servo_temp_limit);
+        assert_eq!(config.power_5v_temp_limit, decoded.power_5v_temp_limit);
         assert_eq!(config.charge_max_current_ma, decoded.charge_max_current_ma);
         assert_eq!(config.charge_temp_derating, decoded.charge_temp_derating);
         assert_eq!(config.charge_temp_limit, decoded.charge_temp_limit);
@@ -560,8 +560,8 @@ mod tests {
             charge_stop_percentage: 80,
             tx_log_level: LogLevel::Debug,
             servo_current_limit_ma: 100,
-            servo_temp_limit: 850,
-            temp_5v_limit: 750,
+            power_servo_temp_limit: 850,
+            power_5v_temp_limit: 750,
             charge_max_current_ma: 200,
             charge_temp_derating: 650,
             charge_temp_limit: 750,
@@ -578,8 +578,8 @@ mod tests {
         assert_eq!(decoded.bat_ext_out_on, false);
         assert_eq!(decoded.charge_stop_percentage, 80);
         assert_eq!(decoded.servo_current_limit_ma, 100);
-        assert_eq!(decoded.servo_temp_limit, 850);
-        assert_eq!(decoded.temp_5v_limit, 750);
+        assert_eq!(decoded.power_servo_temp_limit, 850);
+        assert_eq!(decoded.power_5v_temp_limit, 750);
         assert_eq!(decoded.charge_max_current_ma, 200);
         assert_eq!(decoded.charge_temp_derating, 650);
         assert_eq!(decoded.charge_temp_limit, 750);

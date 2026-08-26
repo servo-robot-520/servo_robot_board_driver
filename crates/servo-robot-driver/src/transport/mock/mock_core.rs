@@ -390,8 +390,8 @@ impl MockCore {
         // Return protocol values as f32 for Config::from_type_value
         match ct {
             ConfigType::PowerServoCurrentLimitMa => self.config.servo_current_limit_ma as f32,
-            ConfigType::PowerServoTempLimit => self.config.servo_temp_limit as f32,
-            ConfigType::Power5vTempLimit => self.config.temp_5v_limit as f32,
+            ConfigType::PowerServoTempLimit => self.config.power_servo_temp_limit as f32,
+            ConfigType::Power5vTempLimit => self.config.power_5v_temp_limit as f32,
             ConfigType::ChargeMaxCurrentMa => self.config.charge_max_current_ma as f32,
             ConfigType::ChargeTempDerating => self.config.charge_temp_derating as f32,
             ConfigType::ChargeTempLimit => self.config.charge_temp_limit as f32,
@@ -410,8 +410,8 @@ impl MockCore {
         // Config values are now raw u16/u32, assign directly
         match config {
             Config::PowerServoCurrentLimitMa(v) => self.config.servo_current_limit_ma = v,
-            Config::PowerServoTempLimit(v) => self.config.servo_temp_limit = v,
-            Config::Power5vTempLimit(v) => self.config.temp_5v_limit = v,
+            Config::PowerServoTempLimit(v) => self.config.power_servo_temp_limit = v,
+            Config::Power5vTempLimit(v) => self.config.power_5v_temp_limit = v,
             Config::ChargeMaxCurrentMa(v) => self.config.charge_max_current_ma = v,
             Config::ChargeTempDerating(v) => self.config.charge_temp_derating = v,
             Config::ChargeTempLimit(v) => self.config.charge_temp_limit = v,

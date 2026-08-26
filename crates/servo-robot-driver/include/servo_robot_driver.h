@@ -155,8 +155,8 @@ typedef struct {
     uint8_t charge_stop_percentage;
     uint8_t tx_log_level;
     uint16_t servo_current_limit_ma;
-    uint16_t servo_temp_limit;
-    uint16_t temp_5v_limit;
+    uint16_t power_servo_temp_limit;
+    uint16_t power_5v_temp_limit;
     uint16_t charge_max_current_ma;
     uint16_t charge_temp_derating;
     uint16_t charge_temp_limit;

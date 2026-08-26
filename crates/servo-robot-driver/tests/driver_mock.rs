@@ -222,7 +222,7 @@ fn test_driver_query_all_configs_sync() {
     let config = result.unwrap();
     // Config values are u16 (*10), so 5.0A = 50, 80.0°C = 800
     assert_eq!(config.servo_current_limit_ma, 50);
-    assert_eq!(config.servo_temp_limit, 800);
+    assert_eq!(config.power_servo_temp_limit, 800);
 
     driver.stop().unwrap();
 }
