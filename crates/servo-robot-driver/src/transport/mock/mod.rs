@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/6 21:43
-
 //! 模拟传输层实现
 
 pub(crate) mod mock_core;
@@ -142,7 +135,7 @@ mod tests {
 
         let query = Request::new(
             RequestType::ConfigQuery,
-            vec![ConfigType::PowerServoCurrentLimitMa as u8],
+            vec![ConfigType::PwrBatOut1CurrentLimitMa as u8],
         );
         let frame = RawFrame {
             frame_type: FrameType::Request,

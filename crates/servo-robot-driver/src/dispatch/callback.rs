@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:39
-
 //! DriverCallback trait 定义
 
 use crate::error::DriverError;
@@ -206,11 +199,11 @@ mod tests {
     }
 
     impl DriverCallback for Cb {
-        fn on_ack_failed(&mut self, response: &Response) {
-            self.failed.push(response.request_type);
-        }
         fn on_ack_cfg_query(&mut self, _config: &Config) {
             self.cfg_query_called = true;
+        }
+        fn on_ack_failed(&mut self, response: &Response) {
+            self.failed.push(response.request_type);
         }
     }
 

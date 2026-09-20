@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:39
-
 //! 基于 serialport crate 的传输层实现
 
 use crate::error::DriverError;
@@ -148,7 +141,7 @@ mod tests {
     #[test]
     fn test_scan_loop_returns_on_timeout() {
         struct IdleReader;
-        impl std::io::Read for IdleReader {
+        impl Read for IdleReader {
             fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
                 Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle"))
             }

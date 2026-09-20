@@ -117,6 +117,9 @@ impl DriverCallback for CffiCallback {
             charge_in_current_ma: data.charge_in_current_ma,
             bat_voltage_mv: data.bat_voltage_mv,
             bat_current_ma: data.bat_current_ma,
+            bat_out1_current_ma: data.bat_out1_current_ma,
+            bat_out2_current_ma: data.bat_out2_current_ma,
+            pwr_5v_current_ma: data.pwr_5v_current_ma,
         };
         self.with_table(|cb| {
             if let Some(f) = cb.on_power_data {

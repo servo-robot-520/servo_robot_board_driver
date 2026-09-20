@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/6 21:43
-
 //! Driver shares functions
 
 use crate::dispatch::DriverEvent;

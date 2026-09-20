@@ -63,7 +63,7 @@ async fn test_query_all_configs_sync() {
         .expect("query all configs should succeed");
     // mock 默认配置
     assert_eq!(cfg.servo_baud_rate, 115200);
-    assert!(cfg.power_servo_on);
+    assert!(cfg.enable_bat_ou1);
 
     driver.stop().await.unwrap();
 }

@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:39
-
 //! 事件分发系统
 
 pub mod callback;
@@ -25,7 +18,7 @@ pub enum DriverEvent {
     ConfigSnapshot(crate::protocol::config::BoardConfigSnapshot),
     BoardEvent(crate::protocol::event::BoardEvent),
     Diagnostic(crate::protocol::diagnostic::Diagnostic),
-    /// 日志事件 (时间戳: Unix 毫秒, 日志内容)
+    /// 日志事件 (时间戳: Unix 毫秒, 日志内容) 
     Log(u64, crate::protocol::log::LogMessage),
 
     // ═══ 应答事件 ═══

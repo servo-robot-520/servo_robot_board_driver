@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/3 15:59
-
 //! servo-robot-driver - STM32 串口通信驱动
 
 pub mod dispatch;

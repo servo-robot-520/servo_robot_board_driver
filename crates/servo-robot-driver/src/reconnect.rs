@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:50
-
 //! Reconnection configuration
 
 use std::time::Duration;

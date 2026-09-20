@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:39
-
 //! Definition of error type
 
 use thiserror::Error;

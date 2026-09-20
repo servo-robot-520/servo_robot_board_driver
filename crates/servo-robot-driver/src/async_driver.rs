@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/8/15
-
 //! AsyncDriver — 同步 `Driver` 的薄异步门面
 //!
 //! 设计:不复制读循环/重连/等待逻辑。`AsyncDriver` 持 `Arc<Mutex<Driver>>`,

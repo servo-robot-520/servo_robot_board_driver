@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/4 12:39
-
 //! Driver
 
 use crate::dispatch::callback::DriverCallback;
@@ -508,7 +501,12 @@ impl Driver {
                         data
                     }
                     Err(DriverError::IoTimeout) => {
-                        // 空闲超时:回到循环头检查 running,stop() 才能 join 退出
+                        // 空闲超时:回到循环头检查 running,stop() 才能 join 退出。
+                        // 显式释放传输层锁并短暂让出: 阻塞读持锁 100ms, 若解锁后
+                        // 立即重锁, 等待写入的 sync 调用会在非公平 Mutex 上被饿死
+                        // (实测写方可等待数十秒才拿到锁)。
+                        drop(transport_guard);
+                        std::thread::sleep(Duration::from_millis(1));
                         continue;
                     }
                     Err(e) => {
@@ -705,7 +703,7 @@ mod tests {
         let mut driver = Driver::new(NoAckTransport);
         driver.start().unwrap();
         let start = std::time::Instant::now();
-        let r = driver.query_config_sync(ConfigType::SwitchServoPower);
+        let r = driver.query_config_sync(ConfigType::EnableBatOut1);
         assert!(matches!(r, Err(DriverError::Timeout)));
         // 等待上限 1s:确认按超时返回而非挂死(上限放宽以容忍并行测试负载)
         assert!(

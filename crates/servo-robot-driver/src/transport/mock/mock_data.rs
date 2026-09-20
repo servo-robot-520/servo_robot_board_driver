@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/6 21:43
-
 //! 模拟数据生成器
 
 use rand::RngExt;
@@ -159,6 +152,9 @@ impl PowerSimulator {
             charge_in_current_ma: (charge_current.max(0.0) * 10.0) as u16,
             bat_voltage_mv: (bat_voltage * 10.0) as u16,
             bat_current_ma: (bat_current * 10.0) as i16,
+            bat_out1_current_ma: (servo_current * 0.8 * 10.0) as u16,
+            bat_out2_current_ma: (servo_current * 0.2 * 10.0) as u16,
+            pwr_5v_current_ma: (2.5 * 10.0) as u16,
         }
     }
 }
@@ -276,6 +272,7 @@ impl DeviceInfoSimulator {
             flash_app_kb: 240,
             flash_ota_kb: 128,
             flash_user_kb: 128,
+            hardware_version: crate::protocol::device_info::Version::new(1, 0, 0),
         }
     }
 }
@@ -381,7 +378,7 @@ impl EventSimulator {
 
         // 偶尔触发保护事件
         let protection_flags = if self.event_count.is_multiple_of(500) {
-            crate::protocol::event::ProtectionFlags::SERVO_OVERCURRENT
+            crate::protocol::event::ProtectionFlags::PWR_SERVO_OVERCURRENT
         } else {
             crate::protocol::event::ProtectionFlags::empty()
         };

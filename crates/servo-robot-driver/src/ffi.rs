@@ -68,24 +68,34 @@ pub struct SrConfig {
     pub value: f32,
 }
 
-/// 板级配置全量快照(24 字节 payload 的镜像)
+/// 板级配置全量快照(37 字节 payload 的镜像)
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SrBoardConfig {
-    pub power_servo_on: u8,
-    pub power_5v_on: u8,
-    pub charge_on: u8,
-    pub bat_ext_out_on: u8,
-    pub charge_stop_percentage: u8,
-    pub tx_log_level: u8,
+    // Switches
+    pub enable_bat_out1: u8,
+    pub enable_bat_out2: u8,
+    pub enable_pwr_5v: u8,
+    pub enable_charge: u8,
+    // Current limits
     pub servo_current_limit_ma: u16,
+    pub bat_out2_current_limit_ma: u16,
+    pub pwr_5v_out_current_limit_ma: u16,
+    pub servo_out_current_limit_ma: u16,
+    pub charge_min_current_ma: u16,
+    pub charge_max_current_ma: u16,
+    // Temp limits
     pub power_servo_temp_limit: u16,
     pub power_5v_temp_limit: u16,
-    pub charge_max_current_ma: u16,
     pub charge_temp_derating: u16,
     pub charge_temp_limit: u16,
-    pub charge_stop_voltage_mv: u16,
+    // Misc
     pub servo_baud_rate: u32,
+    pub charge_stop_percentage: u8,
+    pub charge_stop_voltage_mv: u16,
+    pub tx_log_level: u8,
+    pub bms_ic: u8,
+    pub imu_ic: u8,
 }
 
 #[repr(C)]
@@ -109,6 +119,9 @@ pub struct SrPower {
     pub charge_in_current_ma: u16,
     pub bat_voltage_mv: u16,
     pub bat_current_ma: i16,
+    pub bat_out1_current_ma: u16,
+    pub bat_out2_current_ma: u16,
+    pub pwr_5v_current_ma: u16,
 }
 
 #[repr(C)]
@@ -151,6 +164,9 @@ pub struct SrDeviceInfo {
     pub fw_major: u8,
     pub fw_minor: u8,
     pub fw_patch: u8,
+    pub hw_major: u8,
+    pub hw_minor: u8,
+    pub hw_patch: u8,
     pub ram_kb: u16,
     pub flash_boot_kb: u16,
     pub flash_app_kb: u16,
@@ -271,20 +287,26 @@ fn to_sr_config(c: Config) -> SrConfig {
 
 fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
     SrBoardConfig {
-        power_servo_on: c.power_servo_on as u8,
-        power_5v_on: c.power_5v_on as u8,
-        charge_on: c.charge_on as u8,
-        bat_ext_out_on: c.bat_ext_out_on as u8,
-        charge_stop_percentage: c.charge_stop_percentage,
-        tx_log_level: c.tx_log_level as u8,
+        enable_bat_out1: c.enable_bat_ou1 as u8,
+        enable_bat_out2: c.enable_bat_out2 as u8,
+        enable_pwr_5v: c.enable_pwr_5v as u8,
+        enable_charge: c.enable_charge as u8,
         servo_current_limit_ma: c.servo_current_limit_ma,
-        power_servo_temp_limit: c.power_servo_temp_limit,
-        power_5v_temp_limit: c.power_5v_temp_limit,
+        bat_out2_current_limit_ma: c.bat_out2_current_limit_ma,
+        pwr_5v_out_current_limit_ma: c.pwr_5v_out_current_limit_ma,
+        servo_out_current_limit_ma: c.servo_out_current_limit_ma,
+        charge_min_current_ma: c.charge_min_current_ma,
         charge_max_current_ma: c.charge_max_current_ma,
+        power_servo_temp_limit: c.pwr_servo_temp_limit,
+        power_5v_temp_limit: c.pwr_5v_temp_limit,
         charge_temp_derating: c.charge_temp_derating,
         charge_temp_limit: c.charge_temp_limit,
-        charge_stop_voltage_mv: c.charge_stop_voltage_mv,
         servo_baud_rate: c.servo_baud_rate,
+        charge_stop_percentage: c.charge_stop_percentage,
+        charge_stop_voltage_mv: c.charge_stop_voltage_mv,
+        tx_log_level: c.tx_log_level as u8,
+        bms_ic: c.bms_ic,
+        imu_ic: c.imu_ic,
     }
 }
 
@@ -296,6 +318,9 @@ fn to_sr_device_info(info: &DeviceInfo) -> SrDeviceInfo {
         fw_major: info.firmware_version.major,
         fw_minor: info.firmware_version.minor,
         fw_patch: info.firmware_version.patch,
+        hw_major: info.hardware_version.major,
+        hw_minor: info.hardware_version.minor,
+        hw_patch: info.hardware_version.patch,
         ram_kb: info.ram_kb,
         flash_boot_kb: info.flash_boot_kb,
         flash_app_kb: info.flash_app_kb,
@@ -729,24 +754,24 @@ mod tests {
                     value: 1.0,
                 },
                 1.0,
-            ), // SwitchPowerServo
+            ), // EnableBatOut1
             (
                 SrConfig {
-                    typ: 0x20,
+                    typ: 0x41,
                     value: 80.0,
                 },
                 80.0,
             ), // ChargeStopSoc
             (
                 SrConfig {
-                    typ: 0x30,
+                    typ: 0x20,
                     value: 500.0,
                 },
                 500.0,
-            ), // PowerServoCurrentLimitMa
+            ), // PwrBatOut1CurrentLimitMa
             (
                 SrConfig {
-                    typ: 0x37,
+                    typ: 0x40,
                     value: 1000000.0,
                 },
                 1000000.0,
@@ -823,7 +848,7 @@ mod tests {
         assert_eq!(sr_driver_query_all_configs(d, &mut out), SR_OK);
         // mock 默认配置
         assert_eq!(out.servo_baud_rate, 115200);
-        assert_eq!(out.power_servo_on, 1);
+        assert_eq!(out.enable_bat_out1, 1);
         assert_eq!(out.charge_stop_percentage, 100);
         assert_eq!(sr_driver_stop(d), SR_OK);
         sr_driver_free(d);
@@ -837,7 +862,7 @@ mod tests {
         let rc = sr_driver_write_config_sync(
             d,
             SrConfig {
-                typ: 0x37,
+                typ: 0x40,
                 value: 1000000.0,
             },
             &mut success,
@@ -846,7 +871,7 @@ mod tests {
         assert_eq!(success, 1);
         // 写回后查询验证(mock 同步更新内部配置)
         let mut out = SrConfig { typ: 0, value: 0.0 };
-        assert_eq!(sr_driver_query_config(d, 0x37, &mut out), SR_OK);
+        assert_eq!(sr_driver_query_config(d, 0x40, &mut out), SR_OK);
         assert_eq!(out.value, 1000000.0);
         assert_eq!(sr_driver_stop(d), SR_OK);
         sr_driver_free(d);
@@ -858,7 +883,7 @@ mod tests {
         assert_eq!(sr_driver_start(d), SR_OK);
         let mut out = SrConfig { typ: 0, value: 0.0 };
         assert_eq!(sr_driver_query_config(d, 0x10, &mut out), SR_OK);
-        assert_eq!(out.value, 1.0); // mock 默认 power_servo_on = true
+        assert_eq!(out.value, 1.0); // mock 默认 enable_bat_out1 = true
         assert_eq!(sr_driver_stop(d), SR_OK);
         sr_driver_free(d);
     }

@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/6 21:50
-
 //! Mock 传输层共享内核
 //!
 //! 包含所有模拟状态和逻辑，供 MockTransport 使用。
@@ -251,7 +244,7 @@ impl MockCore {
                 Err(_) => return,
             };
 
-            match request.kind {
+            match request.request_type {
                 RequestType::ConfigQuery => {
                     if !request.data.is_empty() {
                         let config_type = ConfigType::from_u8(request.data[0]);
@@ -307,7 +300,7 @@ impl MockCore {
                     }
                 }
                 RequestType::Reset | RequestType::Shutdown | RequestType::Ota => {
-                    let resp = Response::simple(request.kind, true);
+                    let resp = Response::simple(request.request_type, true);
                     let frame = RawFrame {
                         frame_type: FrameType::Response,
                         payload: resp.to_payload(),
@@ -317,7 +310,7 @@ impl MockCore {
                         LogLevel::Info,
                         "command.rs",
                         "handle_command",
-                        &format!("{} executed", request.kind),
+                        &format!("{} executed", request.request_type),
                     );
                 }
                 RequestType::DeviceInfo => {
@@ -389,40 +382,51 @@ impl MockCore {
     fn get_config_value(&self, ct: ConfigType) -> f32 {
         // Return protocol values as f32 for Config::from_type_value
         match ct {
-            ConfigType::PowerServoCurrentLimitMa => self.config.servo_current_limit_ma as f32,
-            ConfigType::PowerServoTempLimit => self.config.power_servo_temp_limit as f32,
-            ConfigType::Power5vTempLimit => self.config.power_5v_temp_limit as f32,
+            ConfigType::EnableBatOut1 => self.config.enable_bat_ou1 as u8 as f32,
+            ConfigType::EnableBatOut2 => self.config.enable_bat_out2 as u8 as f32,
+            ConfigType::EnablePwr5V => self.config.enable_pwr_5v as u8 as f32,
+            ConfigType::EnableCharge => self.config.enable_charge as u8 as f32,
+            ConfigType::PwrBatOut1CurrentLimitMa => self.config.servo_current_limit_ma as f32,
+            ConfigType::PwrBatOut2CurrentLimitMa => self.config.bat_out2_current_limit_ma as f32,
+            ConfigType::Pwr5VOutCurrentLimitMa => self.config.pwr_5v_out_current_limit_ma as f32,
+            ConfigType::PwrServoCurrentLimitMa => self.config.servo_out_current_limit_ma as f32,
+            ConfigType::ChargeMinCurrentMa => self.config.charge_min_current_ma as f32,
             ConfigType::ChargeMaxCurrentMa => self.config.charge_max_current_ma as f32,
+            ConfigType::PwrServoTempLimit => self.config.pwr_servo_temp_limit as f32,
+            ConfigType::Pwr5vTempLimit => self.config.pwr_5v_temp_limit as f32,
             ConfigType::ChargeTempDerating => self.config.charge_temp_derating as f32,
             ConfigType::ChargeTempLimit => self.config.charge_temp_limit as f32,
-            ConfigType::ChargeStopVoltageMv => self.config.charge_stop_voltage_mv as f32,
-            ConfigType::ChargeStopSoc => self.config.charge_stop_percentage as f32,
-            ConfigType::TxLogLevel => self.config.tx_log_level as u8 as f32,
-            ConfigType::SwitchServoPower => self.config.power_servo_on as u8 as f32,
-            ConfigType::Switch5VPower => self.config.power_5v_on as u8 as f32,
-            ConfigType::SwitchCharge => self.config.charge_on as u8 as f32,
-            ConfigType::SwitchBatExtOut => self.config.bat_ext_out_on as u8 as f32,
             ConfigType::ServoBaudRate => self.config.servo_baud_rate as f32,
+            ConfigType::ChargeStopSoc => self.config.charge_stop_percentage as f32,
+            ConfigType::ChargeStopVoltageMv => self.config.charge_stop_voltage_mv as f32,
+            ConfigType::TxLogLevel => self.config.tx_log_level as u8 as f32,
+            ConfigType::BMSIc => self.config.bms_ic as f32,
+            ConfigType::IMUIc => self.config.imu_ic as f32,
         }
     }
 
     fn update_config(&mut self, config: Config) {
-        // Config values are now raw u16/u32, assign directly
         match config {
+            Config::EnableBatOut1(on) => self.config.enable_bat_ou1 = on,
+            Config::EnableBatOut2(on) => self.config.enable_bat_out2 = on,
+            Config::EnablePwr5V(on) => self.config.enable_pwr_5v = on,
+            Config::EnableCharge(on) => self.config.enable_charge = on,
             Config::PowerServoCurrentLimitMa(v) => self.config.servo_current_limit_ma = v,
-            Config::PowerServoTempLimit(v) => self.config.power_servo_temp_limit = v,
-            Config::Power5vTempLimit(v) => self.config.power_5v_temp_limit = v,
+            Config::PowerBatOut2CurrentLimitMa(v) => self.config.bat_out2_current_limit_ma = v,
+            Config::Power5VOutCurrentLimitMa(v) => self.config.pwr_5v_out_current_limit_ma = v,
+            Config::PowerServoOutCurrentLimitMa(v) => self.config.servo_out_current_limit_ma = v,
+            Config::ChargeMinCurrentMa(v) => self.config.charge_min_current_ma = v,
             Config::ChargeMaxCurrentMa(v) => self.config.charge_max_current_ma = v,
+            Config::PowerServoTempLimit(v) => self.config.pwr_servo_temp_limit = v,
+            Config::Power5vTempLimit(v) => self.config.pwr_5v_temp_limit = v,
             Config::ChargeTempDerating(v) => self.config.charge_temp_derating = v,
             Config::ChargeTempLimit(v) => self.config.charge_temp_limit = v,
-            Config::ChargeStopVoltageMv(v) => self.config.charge_stop_voltage_mv = v,
-            Config::ChargeStopSoc(v) => self.config.charge_stop_percentage = v,
-            Config::TxLogLevel(level) => self.config.tx_log_level = level,
-            Config::SwitchPowerServo(on) => self.config.power_servo_on = on,
-            Config::SwitchPower5V(on) => self.config.power_5v_on = on,
-            Config::SwitchCharge(on) => self.config.charge_on = on,
-            Config::SwitchBatExtOut(on) => self.config.bat_ext_out_on = on,
             Config::ServoBaudRate(v) => self.config.servo_baud_rate = v,
+            Config::ChargeStopSoc(v) => self.config.charge_stop_percentage = v,
+            Config::ChargeStopVoltageMv(v) => self.config.charge_stop_voltage_mv = v,
+            Config::TxLogLevel(level) => self.config.tx_log_level = level,
+            Config::BMSIc(v) => self.config.bms_ic = v,
+            Config::IMUIc(v) => self.config.imu_ic = v,
         }
     }
 }

@@ -47,36 +47,55 @@ typedef enum {
     SR_ERR_ALREADY_STARTED = -14,
 } sr_error_code;
 
-/// 配置类型(ConfigType,0x10~0x37;value 类型见各常量注释)
+/// 配置类型(ConfigType,0x10~0x45;value 类型见各常量注释)
 typedef enum {
+    // Switches (0x10~0x13)
     /// bool 开关:舵机电源
-    SR_CONFIG_SWITCH_SERVO_POWER = 0x10,
-    /// bool 开关:5V 电源
-    SR_CONFIG_SWITCH_5V_POWER = 0x11,
-    /// bool 开关:电池充电
-    SR_CONFIG_SWITCH_CHARGE = 0x12,
+    SR_CONFIG_ENABLE_BAT_OUT1 = 0x10,
     /// bool 开关:电池外部输出
-    SR_CONFIG_SWITCH_BAT_EXT_OUT = 0x13,
-    /// u8:充电容量上限百分比(1~100)
-    SR_CONFIG_CHARGE_STOP_SOC = 0x20,
-    /// u8:板子上报日志等级(SR_LOG_*)
-    SR_CONFIG_TX_LOG_LEVEL = 0x21,
+    SR_CONFIG_ENABLE_BAT_OUT2 = 0x11,
+    /// bool 开关:5V 电源
+    SR_CONFIG_ENABLE_PWR_5V = 0x12,
+    /// bool 开关:电池充电
+    SR_CONFIG_ENABLE_CHARGE = 0x13,
+
+    // Current limits (0x20~0x25)
     /// u16:舵机电源限流(mA)
-    SR_CONFIG_SERVO_CURRENT_LIMIT_MA = 0x30,
-    /// u16:舵机电源温度上限(×10)
-    SR_CONFIG_SERVO_TEMP_LIMIT = 0x31,
-    /// u16:5V 电源温度上限(×10)
-    SR_CONFIG_5V_TEMP_LIMIT = 0x32,
+    SR_CONFIG_PWR_BAT_OUT1_CURRENT_LIMIT_MA = 0x20,
+    /// u16:电池外部输出限流(mA)
+    SR_CONFIG_PWR_BAT_OUT2_CURRENT_LIMIT_MA = 0x21,
+    /// u16:5V 输出限流(mA)
+    SR_CONFIG_PWR_5V_OUT_CURRENT_LIMIT_MA = 0x22,
+    /// u16:舵机电源输出限流(mA)
+    SR_CONFIG_PWR_SERVO_CURRENT_LIMIT_MA = 0x23,
+    /// u16:最小充电电流(mA)
+    SR_CONFIG_CHARGE_MIN_CURRENT_MA = 0x24,
     /// u16:最大充电电流(mA)
-    SR_CONFIG_CHARGE_MAX_CURRENT_MA = 0x33,
+    SR_CONFIG_CHARGE_MAX_CURRENT_MA = 0x25,
+
+    // Temperature limits (0x30~0x33)
+    /// u16:舵机电源温度上限(×10)
+    SR_CONFIG_PWR_SERVO_TEMP_LIMIT = 0x30,
+    /// u16:5V 电源温度上限(×10)
+    SR_CONFIG_PWR_5V_TEMP_LIMIT = 0x31,
     /// u16:充电降流温度阈值(×10)
-    SR_CONFIG_CHARGE_TEMP_DERATING = 0x34,
+    SR_CONFIG_CHARGE_TEMP_DERATING = 0x32,
     /// u16:充电停止温度(×10)
-    SR_CONFIG_CHARGE_TEMP_LIMIT = 0x35,
+    SR_CONFIG_CHARGE_TEMP_LIMIT = 0x33,
+
+    // Misc (0x40~0x45)
+    /// u32:舵机串口波特率(设为 0 禁用)
+    SR_CONFIG_SERVO_BAUD_RATE = 0x40,
+    /// u8:充电停止电量百分比(1~100)
+    SR_CONFIG_CHARGE_STOP_SOC = 0x41,
     /// u16:充电截止电压(mV)
-    SR_CONFIG_CHARGE_STOP_VOLTAGE_MV = 0x36,
-    /// u32:舵机串口波特率
-    SR_CONFIG_SERVO_BAUD_RATE = 0x37,
+    SR_CONFIG_CHARGE_STOP_VOLTAGE_MV = 0x42,
+    /// u8:板子上报日志等级(SR_LOG_*)
+    SR_CONFIG_TX_LOG_LEVEL = 0x43,
+    /// u8:BMS IC 类型(0=NaN, 1=BQ40Z50, 2=BQ28Z10)
+    SR_CONFIG_BMS_IC = 0x44,
+    /// u8:IMU IC 类型(0=NaN, 1=MPU6500, 2=MPU6050)
+    SR_CONFIG_IMU_IC = 0x45,
 } sr_config_type;
 
 /// 板级命令(CommandType,一次性动作)
@@ -146,22 +165,32 @@ typedef struct {
     float value;
 } sr_config;
 
-/// 板级配置全量快照(24 字节 payload 的镜像)
+/// 板级配置全量快照(34 字节 payload 的镜像)
 typedef struct {
-    uint8_t power_servo_on;
-    uint8_t power_5v_on;
-    uint8_t charge_on;
-    uint8_t bat_ext_out_on;
-    uint8_t charge_stop_percentage;
-    uint8_t tx_log_level;
+    // Switches (0x10~0x13)
+    uint8_t enable_bat_out1;
+    uint8_t enable_bat_out2;
+    uint8_t enable_pwr_5v;
+    uint8_t enable_charge;
+    // Current limits (0x20~0x25)
     uint16_t servo_current_limit_ma;
+    uint16_t bat_out2_current_limit_ma;
+    uint16_t pwr_5v_out_current_limit_ma;
+    uint16_t servo_out_current_limit_ma;
+    uint16_t charge_min_current_ma;
+    uint16_t charge_max_current_ma;
+    // Temp limits (0x30~0x33)
     uint16_t power_servo_temp_limit;
     uint16_t power_5v_temp_limit;
-    uint16_t charge_max_current_ma;
     uint16_t charge_temp_derating;
     uint16_t charge_temp_limit;
-    uint16_t charge_stop_voltage_mv;
+    // Misc (0x40~0x45)
     uint32_t servo_baud_rate;
+    uint8_t charge_stop_percentage;
+    uint16_t charge_stop_voltage_mv;
+    uint8_t tx_log_level;
+    uint8_t bms_ic;
+    uint8_t imu_ic;
 } sr_board_config;
 
 /// IMU 数据
@@ -194,6 +223,12 @@ typedef struct {
     uint16_t bat_voltage_mv;
     /// 电池电流(+ 充电 / - 放电)
     int16_t bat_current_ma;
+    /// 电池输出1电流
+    uint16_t bat_out1_current_ma;
+    /// 电池输出2电流
+    uint16_t bat_out2_current_ma;
+    /// 5V输出电流
+    uint16_t pwr_5v_current_ma;
 } sr_power;
 
 /// 电池状态
@@ -252,6 +287,9 @@ typedef struct {
     uint8_t fw_major;
     uint8_t fw_minor;
     uint8_t fw_patch;
+    uint8_t hw_major;
+    uint8_t hw_minor;
+    uint8_t hw_patch;
     /// RAM 大小 (KB)
     uint16_t ram_kb;
     /// Bootloader Flash (KB)
@@ -418,7 +456,7 @@ int sr_driver_query_config(sr_driver* d, uint8_t typ, sr_config* out);
 /// 查询全部配置并等待响应(阻塞 ≤1s)。
 ///
 /// @param d   句柄
-/// @param out [out] 24 字节快照(14 个字段)
+/// @param out [out] 34 字节快照(20 个字段)
 /// @return SR_OK 成功;SR_ERR_TIMEOUT 超时;其他见 sr_error_code
 int sr_driver_query_all_configs(sr_driver* d, sr_board_config* out);
 
