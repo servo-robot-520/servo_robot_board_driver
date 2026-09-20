@@ -19,6 +19,7 @@ enum_with_from_u8! {
         EnableBatOut2            = 0x11 => "Battery Extra Output",
         EnablePwr5V              = 0x12 => "5V Power",
         EnableCharge             = 0x13 => "Charge",
+        EnableExtServoPower      = 0x14 => "Ext Servo Power",
 
         PwrBatOut1CurrentLimitMa = 0x20 => "Bat Out1 Current Limit",
         PwrBatOut2CurrentLimitMa = 0x21 => "Bat Out2 Current Limit",
@@ -38,7 +39,7 @@ enum_with_from_u8! {
         ChargeStopVoltageMv      = 0x42 => "Charge Stop Voltage",
         // servo robot board发送的日志等级
         TxLogLevel               = 0x43 => "TxLog Level",
-        // Nan, BQ40Z50, BQ28Z10
+        // Nan, BQ40Z50, BQ28Z610
         BMSIc                    = 0x44 => "BMS IC",
         // Nan, MPU6500, MPU6050
         IMUIc                    = 0x45 => "IMU IC",
@@ -69,9 +70,13 @@ impl ConfigType {
     pub fn value_size(&self) -> Option<usize> {
         match self {
             // Switches: 1 byte (bool)
-            Self::EnableBatOut1 | Self::EnableBatOut2 | Self::EnablePwr5V | Self::EnableCharge => {
-                Some(1)
-            }
+            Self::EnableBatOut1
+            | Self::EnableBatOut2
+            | Self::EnablePwr5V
+            | Self::EnableCharge
+            // When the external servo power supply is enabled,
+            // the ADC collects data from the corresponding channel to obtain the servo power supply voltage and power.
+            | Self::EnableExtServoPower => Some(1),
             // u8 values: 1 byte
             Self::ChargeStopSoc | Self::TxLogLevel | Self::BMSIc | Self::IMUIc => Some(1),
             // u16 values: 2 bytes
@@ -199,6 +204,7 @@ impl Config {
             ConfigType::EnablePwr5V => Self::EnablePwr5V(value != 0.0),
             ConfigType::EnableCharge => Self::EnableCharge(value != 0.0),
             ConfigType::EnableBatOut2 => Self::EnableBatOut2(value != 0.0),
+            ConfigType::EnableExtServoPower => Self::EnablePwr5V(value != 0.0),
             ConfigType::ChargeStopSoc => Self::ChargeStopSoc(value as _),
             ConfigType::TxLogLevel => Self::TxLogLevel(LogLevel::from_u8(value as _)),
             ConfigType::PwrBatOut1CurrentLimitMa => Self::PowerServoCurrentLimitMa(value as _),
@@ -236,7 +242,8 @@ impl Config {
             ConfigType::EnableBatOut1
             | ConfigType::EnablePwr5V
             | ConfigType::EnableCharge
-            | ConfigType::EnableBatOut2 => 1,
+            | ConfigType::EnableBatOut2
+            | ConfigType::EnableExtServoPower => 1,
             // ChargeStopSoc: 1 byte (u8)
             ConfigType::ChargeStopSoc => 1,
             // TxLogLevel: 1 byte (u8)
@@ -330,6 +337,7 @@ pub struct BoardConfigSnapshot {
     pub enable_bat_out2: bool,
     pub enable_pwr_5v: bool,
     pub enable_charge: bool,
+    pub enable_ext_servo_power: bool,
     // === Current limits (0x20~0x25) ===
     /// Servo power supply current limit (mA)
     pub servo_current_limit_ma: u16,
@@ -375,6 +383,7 @@ impl Default for BoardConfigSnapshot {
             enable_bat_out2: true,
             enable_pwr_5v: true,
             enable_charge: true,
+            enable_ext_servo_power: true,
             // Current limits
             servo_current_limit_ma: 50,
             bat_out2_current_limit_ma: 0,
@@ -420,6 +429,8 @@ impl BoardConfigSnapshot {
         o += 1;
         let enable_charge = data[o] != 0;
         o += 1;
+        let enable_ext_servo_power = data[o] != 0;
+        o += 1;
 
         // === Current limits (0x20~0x25) — 6×u16 = 12 bytes ===
         let servo_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
@@ -446,8 +457,7 @@ impl BoardConfigSnapshot {
         o += 2;
 
         // === Misc (0x40~0x45) — u32 + u8 + u16 + u8 + u8 = 11 bytes ===
-        let servo_baud_rate =
-            u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
+        let servo_baud_rate = u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
         o += 4;
         let charge_stop_percentage = data[o];
         o += 1;
@@ -465,6 +475,7 @@ impl BoardConfigSnapshot {
             enable_bat_out2,
             enable_pwr_5v,
             enable_charge,
+            enable_ext_servo_power,
             servo_current_limit_ma,
             bat_out2_current_limit_ma,
             pwr_5v_out_current_limit_ma,
@@ -492,6 +503,7 @@ impl BoardConfigSnapshot {
         buf.push(self.enable_bat_out2 as u8);
         buf.push(self.enable_pwr_5v as u8);
         buf.push(self.enable_charge as u8);
+        buf.push(self.enable_ext_servo_power as u8);
 
         // === Current limits (0x20~0x25) ===
         buf.extend_from_slice(&self.servo_current_limit_ma.to_le_bytes());
@@ -643,16 +655,10 @@ mod tests {
             config.servo_out_current_limit_ma,
             decoded.servo_out_current_limit_ma
         );
-        assert_eq!(
-            config.charge_min_current_ma,
-            decoded.charge_min_current_ma
-        );
+        assert_eq!(config.charge_min_current_ma, decoded.charge_min_current_ma);
         assert_eq!(config.charge_max_current_ma, decoded.charge_max_current_ma);
         // Temp limits
-        assert_eq!(
-            config.pwr_servo_temp_limit,
-            decoded.pwr_servo_temp_limit
-        );
+        assert_eq!(config.pwr_servo_temp_limit, decoded.pwr_servo_temp_limit);
         assert_eq!(config.pwr_5v_temp_limit, decoded.pwr_5v_temp_limit);
         assert_eq!(config.charge_temp_derating, decoded.charge_temp_derating);
         assert_eq!(config.charge_temp_limit, decoded.charge_temp_limit);
@@ -677,6 +683,7 @@ mod tests {
             enable_bat_out2: false,
             enable_pwr_5v: false,
             enable_charge: true,
+            enable_ext_servo_power: true,
             servo_current_limit_ma: 100,
             bat_out2_current_limit_ma: 300,
             pwr_5v_out_current_limit_ma: 500,
@@ -703,6 +710,7 @@ mod tests {
         assert_eq!(decoded.enable_bat_out2, false);
         assert_eq!(decoded.enable_pwr_5v, false);
         assert_eq!(decoded.enable_charge, true);
+        assert_eq!(decoded.enable_ext_servo_power, true);
         assert_eq!(decoded.servo_current_limit_ma, 100);
         assert_eq!(decoded.bat_out2_current_limit_ma, 300);
         assert_eq!(decoded.pwr_5v_out_current_limit_ma, 500);

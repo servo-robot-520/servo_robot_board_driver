@@ -92,7 +92,7 @@ typedef enum {
     SR_CONFIG_CHARGE_STOP_VOLTAGE_MV = 0x42,
     /// u8:板子上报日志等级(SR_LOG_*)
     SR_CONFIG_TX_LOG_LEVEL = 0x43,
-    /// u8:BMS IC 类型(0=NaN, 1=BQ40Z50, 2=BQ28Z10)
+    /// u8:BMS IC 类型(0=NaN, 1=BQ40Z50, 2=BQ28Z610)
     SR_CONFIG_BMS_IC = 0x44,
     /// u8:IMU IC 类型(0=NaN, 1=MPU6500, 2=MPU6050)
     SR_CONFIG_IMU_IC = 0x45,
