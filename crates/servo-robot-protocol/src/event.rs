@@ -15,21 +15,28 @@ bitflags::bitflags! {
     pub struct StateChangeFlags: u16 {
         const CHARGER_CONNECTED = 1 << 0;
         const FAN_ENABLED       = 1 << 1;
-        const SERVO_POWER_ON    = 1 << 2;
-        const POWER_5V_ON       = 1 << 3;
-        const BAT_EXT_OUT_ON    = 1 << 4;
+        const ENABLE_BAT_OUT1   = 1 << 2;
+        const ENABLE_BAT_OUT2   = 1 << 3;
+        const PWR_5V_ON       = 1 << 4;
     }
 }
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct ProtectionFlags: u16 {
-        const SERVO_OVERCURRENT = 1 << 0;
-        const SERVO_THERMAL     = 1 << 1;
-        const DCDC_5V_THERMAL   = 1 << 2;
-        const CHARGE_DERATING   = 1 << 3;
-        const CHARGE_THERMAL    = 1 << 4;
-        const BATTERY_LOW       = 1 << 5;
+        const BAT_OVERCURRENT       = 1 << 0;
+        const PWR_SERVO_OVERCURRENT = 1 << 1;
+        const PWR_5V_OVERCURRENT    = 1 << 2;
+        const BAT_OUT1_OVERCURRENT  = 1 << 3;
+        const BAT_OUT2_OVERCURRENT  = 1 << 4;
+
+        const BAT_THERMAL           = 1 << 5;
+        const PWR_SERVO_THERMAL     = 1 << 6;
+        const PWR_5V_THERMAL        = 1 << 7;
+        const CHARGE_DERATING       = 1 << 8;
+        const CHARGE_THERMAL        = 1 << 9;
+
+        const BATTERY_LOW           = 1 << 10;
     }
 }
 
@@ -101,35 +108,35 @@ const STATE_CHANGE_MAPPINGS: &[(u16, EventKind, EventKind)] = &[
         EventKind::FanOff,
     ),
     (
-        StateChangeFlags::SERVO_POWER_ON.bits(),
-        EventKind::PowerServoOn,
-        EventKind::PowerServoOff,
+        StateChangeFlags::ENABLE_BAT_OUT1.bits(),
+        EventKind::BatOut1On,
+        EventKind::BatOut2Off,
     ),
     (
-        StateChangeFlags::POWER_5V_ON.bits(),
-        EventKind::Power5vOn,
-        EventKind::Power5vOff,
+        StateChangeFlags::PWR_5V_ON.bits(),
+        EventKind::Pwr5vOn,
+        EventKind::Pwr5vOff,
     ),
     (
-        StateChangeFlags::BAT_EXT_OUT_ON.bits(),
-        EventKind::BatExtOutOn,
-        EventKind::BatExtOutOff,
+        StateChangeFlags::ENABLE_BAT_OUT2.bits(),
+        EventKind::BatOut1On,
+        EventKind::BatOut2Off,
     ),
 ];
 
 /// 保护事件映射 (bit, 事件)
 const PROTECTION_MAPPINGS: &[(u16, EventKind)] = &[
     (
-        ProtectionFlags::SERVO_OVERCURRENT.bits(),
-        EventKind::ServoOvercurrent,
+        ProtectionFlags::PWR_SERVO_OVERCURRENT.bits(),
+        EventKind::PwrServerOvercurrent,
     ),
     (
-        ProtectionFlags::SERVO_THERMAL.bits(),
-        EventKind::PowerServoThermal,
+        ProtectionFlags::PWR_SERVO_THERMAL.bits(),
+        EventKind::PwrServoThermal,
     ),
     (
-        ProtectionFlags::DCDC_5V_THERMAL.bits(),
-        EventKind::Power5vThermal,
+        ProtectionFlags::PWR_5V_THERMAL.bits(),
+        EventKind::Pwr5vThermal,
     ),
     (
         ProtectionFlags::CHARGE_DERATING.bits(),
@@ -175,9 +182,14 @@ pub enum EventKind {
     PdSinkFault,
     UnsupportedCharger,
     // Protect the event
-    ServoOvercurrent,
-    PowerServoThermal,
-    Power5vThermal,
+    BatOvercurrent,
+    PwrServerOvercurrent,
+    Pwr5VOvercurrent,
+    BatOut1Overcurrent,
+    BatOut2Overcurrent,
+    BatThermal,
+    PwrServoThermal,
+    Pwr5vThermal,
     ChargeDerating,
     ChargeThermal,
     BatteryLow,
@@ -195,12 +207,12 @@ pub enum EventKind {
     ChargerDisconnected,
     FanOn,
     FanOff,
-    PowerServoOn,
-    PowerServoOff,
-    Power5vOn,
-    Power5vOff,
-    BatExtOutOn,
-    BatExtOutOff,
+    BatOut1On,
+    BatOut1Off,
+    Pwr5vOn,
+    Pwr5vOff,
+    BatOut2On,
+    BatOut2Off,
 }
 
 impl From<ChargePhase> for EventKind {
@@ -227,9 +239,9 @@ impl core::fmt::Display for EventKind {
             Self::FullCharge => write!(f, "FULL_CHARGE"),
             Self::PdSinkFault => write!(f, "PD_SINK_FAULT"),
             Self::UnsupportedCharger => write!(f, "UNSUPPORTED_CHARGER"),
-            Self::ServoOvercurrent => write!(f, "SERVO_OVERCURRENT"),
-            Self::PowerServoThermal => write!(f, "POWER_SERVO_THERMAL"),
-            Self::Power5vThermal => write!(f, "POWER_5V_THERMAL"),
+            Self::PwrServerOvercurrent => write!(f, "PWR_SERVO_OVERCURRENT"),
+            Self::PwrServoThermal => write!(f, "PWR_SERVO_THERMAL"),
+            Self::Pwr5vThermal => write!(f, "POWER_5V_THERMAL"),
             Self::ChargeDerating => write!(f, "CHARGE_DERATING"),
             Self::ChargeThermal => write!(f, "CHARGE_THERMAL"),
             Self::BatteryLow => write!(f, "BATTERY_LOW"),
@@ -245,12 +257,17 @@ impl core::fmt::Display for EventKind {
             Self::ChargerDisconnected => write!(f, "CHARGER_DISCONNECTED"),
             Self::FanOn => write!(f, "FAN_ON"),
             Self::FanOff => write!(f, "FAN_OFF"),
-            Self::PowerServoOn => write!(f, "POWER_SERVO_ON"),
-            Self::PowerServoOff => write!(f, "POWER_SERVO_OFF"),
-            Self::Power5vOn => write!(f, "POWER_5V_ON"),
-            Self::Power5vOff => write!(f, "POWER_5V_OFF"),
-            Self::BatExtOutOn => write!(f, "BAT_EXT_OUT_ON"),
-            Self::BatExtOutOff => write!(f, "BAT_EXT_OUT_OFF"),
+            Self::BatOvercurrent => write!(f, "BAT_OVERCURRENT"),
+            Self::Pwr5VOvercurrent => write!(f, "PWR_5V_OVERCURRENT"),
+            Self::BatOut1Overcurrent => write!(f, "BAT_OUT1_OVERCURRENT"),
+            Self::BatOut2Overcurrent => write!(f, "BAT_OUT2_OVERCURRENT"),
+            Self::BatThermal => write!(f, "BAT_THERMAL"),
+            Self::BatOut1On => write!(f, "BAT_OUT1_ON"),
+            Self::BatOut1Off => write!(f, "BAT_OUT1_OFF"),
+            Self::BatOut2On => write!(f, "BAT_OUT2_ON"),
+            Self::BatOut2Off => write!(f, "BAT_OUT2_OFF"),
+            Self::Pwr5vOn => write!(f, "PWR_5V_ON"),
+            Self::Pwr5vOff => write!(f, "PWR_5V_OFF"),
         }
     }
 }
@@ -266,9 +283,9 @@ impl EventKind {
             | Self::FullCharge
             | Self::PdSinkFault
             | Self::UnsupportedCharger => EventCategory::Charge,
-            Self::ServoOvercurrent
-            | Self::PowerServoThermal
-            | Self::Power5vThermal
+            Self::PwrServerOvercurrent
+            | Self::PwrServoThermal
+            | Self::Pwr5vThermal
             | Self::ChargeThermal
             | Self::ChargeDerating
             | Self::BatteryLow => EventCategory::Protection,
@@ -280,16 +297,21 @@ impl EventKind {
             | Self::Spi1Error
             | Self::UsbError
             | Self::DmaError => EventCategory::Error,
+            Self::BatOvercurrent
+            | Self::Pwr5VOvercurrent
+            | Self::BatOut1Overcurrent
+            | Self::BatOut2Overcurrent
+            | Self::BatThermal => EventCategory::Protection,
             Self::ChargerConnected
             | Self::ChargerDisconnected
             | Self::FanOn
             | Self::FanOff
-            | Self::PowerServoOn
-            | Self::PowerServoOff
-            | Self::Power5vOn
-            | Self::Power5vOff
-            | Self::BatExtOutOn
-            | Self::BatExtOutOff => EventCategory::StateChange,
+            | Self::BatOut1On
+            | Self::BatOut1Off
+            | Self::BatOut2On
+            | Self::BatOut2Off
+            | Self::Pwr5vOn
+            | Self::Pwr5vOff => EventCategory::StateChange,
         }
     }
 }

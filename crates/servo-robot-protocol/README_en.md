@@ -129,7 +129,7 @@ IMU inertial measurement data. Payload length: 56 bytes (13 × f32 + u32).
 
 ### PowerData
 
-Power electrical measurements. Payload length: 12 bytes.
+Power electrical measurements. Payload length: 18 bytes (9 × u16).
 
 | Field | Type | Unit | Description |
 |-------|------|------|-------------|
@@ -139,6 +139,9 @@ Power electrical measurements. Payload length: 12 bytes.
 | charge_in_current_ma | u16 | mA | USB-PD input current |
 | bat_voltage_mv | u16 | mV | Battery voltage |
 | bat_current_ma | i16 | mA | Battery current (+ charging, - discharging) |
+| bat_out1_current_ma | u16 | mA | Battery output 1 current |
+| bat_out2_current_ma | u16 | mA | Battery output 2 current |
+| pwr_5v_current_ma | u16 | mA | 5V output current |
 
 ### BatteryState
 
@@ -179,6 +182,7 @@ pub struct Version {
 | uid | u32 | - | STM32 unique ID |
 | imu_id | u8 | - | IMU chip ID |
 | firmware_version | Version | - | Firmware version |
+| hardware_version | Version | - | Hardware version |
 | ram_kb | u16 | KB | RAM size |
 | flash_boot_kb | u16 | KB | Bootloader flash size |
 | flash_app_kb | u16 | KB | Application flash size |
@@ -245,9 +249,9 @@ bitflags! {
     pub struct StateChangeFlags: u16 {
         const CHARGER_CONNECTED = 1 << 0;
         const FAN_ENABLED       = 1 << 1;
-        const SERVO_POWER_ON    = 1 << 2;
-        const POWER_5V_ON       = 1 << 3;
-        const BAT_EXT_OUT_ON    = 1 << 4;
+        const ENABLE_BAT_OUT1   = 1 << 2;
+        const ENABLE_BAT_OUT2   = 1 << 3;
+        const PWR_5V_ON         = 1 << 4;
     }
 }
 ```
@@ -257,12 +261,17 @@ bitflags! {
 ```rust
 bitflags! {
     pub struct ProtectionFlags: u16 {
-        const SERVO_OVERCURRENT = 1 << 0;
-        const SERVO_THERMAL     = 1 << 1;
-        const DCDC_5V_THERMAL   = 1 << 2;
-        const CHARGE_DERATING   = 1 << 3;
-        const CHARGE_THERMAL    = 1 << 4;
-        const BATTERY_LOW       = 1 << 5;
+        const BAT_OVERCURRENT       = 1 << 0;
+        const PWR_SERVO_OVERCURRENT = 1 << 1;
+        const PWR_5V_OVERCURRENT    = 1 << 2;
+        const BAT_OUT1_OVERCURRENT  = 1 << 3;
+        const BAT_OUT2_OVERCURRENT  = 1 << 4;
+        const BAT_THERMAL           = 1 << 5;
+        const PWR_SERVO_THERMAL     = 1 << 6;
+        const PWR_5V_THERMAL        = 1 << 7;
+        const CHARGE_DERATING       = 1 << 8;
+        const CHARGE_THERMAL        = 1 << 9;
+        const BATTERY_LOW           = 1 << 10;
     }
 }
 ```
@@ -293,21 +302,23 @@ pub struct EventLog {
     pub kind: EventKind,   // Event type
 }
 
-/// Event type enum (32 variants)
+/// Event type enum (35 variants)
 pub enum EventKind {
-    // Charging events
+    // Charging events (7)
     NotCharging, PreCharge, CcCharge, CvCharge, FullCharge,
     PdSinkFault, UnsupportedCharger,
-    // Protection events
-    ServoOvercurrent, PowerServoThermal, Power5vThermal,
+    // Protection events (11)
+    BatOvercurrent, PwrServerOvercurrent, Pwr5VOvercurrent,
+    BatOut1Overcurrent, BatOut2Overcurrent,
+    BatThermal, PwrServoThermal, Pwr5vThermal,
     ChargeDerating, ChargeThermal, BatteryLow,
-    // Error events
+    // Error events (8)
     UnknownError, Uart1Error, Uart2Error, I2c1Error, I2c3Error,
     Spi1Error, UsbError, DmaError,
-    // State change events
+    // State change events (10)
     ChargerConnected, ChargerDisconnected, FanOn, FanOff,
-    PowerServoOn, PowerServoOff, Power5vOn, Power5vOff,
-    BatExtOutOn, BatExtOutOff,
+    BatOut1On, BatOut1Off, Pwr5vOn, Pwr5vOff,
+    BatOut2On, BatOut2Off,
 }
 
 /// Event category (4 types)
@@ -335,43 +346,89 @@ Log levels: `OFF=0`, `Debug=1`, `Info=2`, `Warn=3`, `Error=4`.
 
 ### Configuration Types
 
+#### Switches (0x10~0x13)
+
 | Type | Value | Description |
 |------|-------|-------------|
-| SwitchServoPower | 0x10 | Servo power switch |
-| Switch5VPower | 0x11 | 5V power switch |
-| SwitchCharge | 0x12 | Charge switch |
-| SwitchBatExtOut | 0x13 | Battery extra output switch |
-| ChargeStopSoc | 0x20 | Charge stop SOC (%) |
-| TxLogLevel | 0x21 | STM32 transmit log level |
-| PowerServoCurrentLimitMa | 0x30 | Servo current limit (mA) |
-| PowerServoTempLimit | 0x31 | Servo temperature limit (×10) |
-| Power5vTempLimit | 0x32 | 5V temperature limit (×10) |
-| ChargeMaxCurrentMa | 0x33 | Charge max current (mA) |
-| ChargeTempDerating | 0x34 | Charge temp derating (×10) |
-| ChargeTempLimit | 0x35 | Charge temp limit (×10) |
-| ChargeStopVoltageMv | 0x36 | Charge stop voltage (mV) |
-| ServoBaudRate | 0x37 | Servo communication baud rate (u32) |
+| EnableBatOut1 | 0x10 | Battery output1 switch |
+| EnableBatOut2 | 0x11 | Battery output2 switch |
+| EnablePwr5V | 0x12 | 5V power switch |
+| EnableCharge | 0x13 | Charge switch |
+
+#### Current Limits (0x20~0x25)
+
+| Type | Value | Unit | Description |
+|------|-------|------|-------------|
+| PwrBatOut1CurrentLimitMa | 0x20 | mA | Battery output1 current limit |
+| PwrBatOut2CurrentLimitMa | 0x21 | mA | Battery output2 current limit |
+| Pwr5VOutCurrentLimitMa | 0x22 | mA | 5V output current limit |
+| PwrServoCurrentLimitMa | 0x23 | mA | Servo power output current limit |
+| ChargeMinCurrentMa | 0x24 | mA | Minimum charging current |
+| ChargeMaxCurrentMa | 0x25 | mA | Maximum charging current |
+
+#### Temperature Limits (0x30~0x33)
+
+| Type | Value | Unit | Description |
+|------|-------|------|-------------|
+| PwrServoTempLimit | 0x30 | ×10 | Servo power temperature limit |
+| Pwr5vTempLimit | 0x31 | ×10 | 5V power temperature limit |
+| ChargeTempDerating | 0x32 | ×10 | Charge temperature derating threshold |
+| ChargeTempLimit | 0x33 | ×10 | Charge stop temperature |
+
+#### Miscellaneous (0x40~0x45)
+
+| Type | Value | Unit | Description |
+|------|-------|------|-------------|
+| ServoBaudRate | 0x40 | baud | Servo communication baud rate (u32), set to 0 to disable |
+| ChargeStopSoc | 0x41 | % | Charge stop SOC |
+| ChargeStopVoltageMv | 0x42 | mV | Charge stop voltage |
+| TxLogLevel | 0x43 | - | STM32 transmit log level |
+| BMSIc | 0x44 | - | BMS IC type (0=NaN, 1=BQ40Z50, 2=BQ28Z10) |
+| IMUIc | 0x45 | - | IMU IC type (0=NaN, 1=MPU6500, 2=MPU6050) |
 
 ### BoardConfigSnapshot
 
-Board configuration snapshot for querying and displaying the current configuration state. Payload length: 24 bytes (4 bool + 2 u8 + 7 u16 + 1 u32).
+Board configuration snapshot for querying and displaying the current configuration state. Payload length: 34 bytes (4 bool + 4 u8 + 11 u16 + 1 u32).
+
+#### Switches (0x10~0x13)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| enable_bat_ou1 | bool | true | Battery output1 switch |
+| enable_bat_out2 | bool | true | Battery output2 switch |
+| enable_pwr_5v | bool | true | 5V power switch |
+| enable_charge | bool | true | Charge switch |
+
+#### Current Limits (0x20~0x25)
 
 | Field | Type | Unit | Default | Description |
 |-------|------|------|---------|-------------|
-| power_servo_on | bool | - | true | Servo power switch |
-| power_5v_on | bool | - | true | 5V power switch |
-| charge_on | bool | - | true | Charge switch |
-| bat_ext_out_on | bool | - | true | Battery extra output switch |
-| charge_stop_percentage | u8 | 1~100 | 100 | Charge stop percentage |
-| tx_log_level | LogLevel | - | Info | STM32 transmit log level |
-| servo_current_limit_ma | u16 | mA | 50 | Servo current limit |
-| servo_temp_limit | u16 | ×10 | 800 | Servo temperature limit (80.0°C) |
-| temp_5v_limit | u16 | ×10 | 700 | 5V temperature limit (70.0°C) |
-| charge_max_current_ma | u16 | mA | 90 | Charge max current |
+| bat_out1_current_limit_ma | u16 | mA | 50 | Battery output1 current limit |
+| bat_out2_current_limit_ma | u16 | mA | 0 | Battery output2 current limit |
+| pwr_5v_out_current_limit_ma | u16 | mA | 0 | 5V output current limit |
+| servo_out_current_limit_ma | u16 | mA | 0 | Servo power output current limit |
+| charge_min_current_ma | u16 | mA | 0 | Minimum charging current |
+| charge_max_current_ma | u16 | mA | 90 | Maximum charging current |
+
+#### Temperature Limits (0x30~0x33)
+
+| Field | Type | Unit | Default | Description |
+|-------|------|------|---------|-------------|
+| power_servo_temp_limit | u16 | ×10 | 800 | Servo power temperature limit (80.0°C) |
+| power_5v_temp_limit | u16 | ×10 | 700 | 5V power temperature limit (70.0°C) |
 | charge_temp_derating | u16 | ×10 | 600 | Charge temp derating (60.0°C) |
 | charge_temp_limit | u16 | ×10 | 700 | Charge stop temperature (70.0°C) |
-| charge_stop_voltage_mv | u16 | mV | 168 | Charge stop voltage |
+
+#### Miscellaneous (0x40~0x45)
+
+| Field | Type | Unit | Default | Description |
+|-------|------|------|---------|-------------|
 | servo_baud_rate | u32 | baud | 115200 | Servo communication baud rate |
+| charge_stop_percentage | u8 | 1~100 | 100 | Charge stop percentage |
+| charge_stop_voltage_mv | u16 | mV | 168 | Charge stop voltage |
+| tx_log_level | LogLevel | - | Info | STM32 transmit log level |
+| bms_ic | u8 | - | 0 | BMS IC type (0=NaN, 1=BQ40Z50, 2=BQ28Z10) |
+| imu_ic | u8 | - | 0 | IMU IC type (0=NaN, 1=MPU6500, 2=MPU6050) |
 
 ### ServoCmdWrapper
 

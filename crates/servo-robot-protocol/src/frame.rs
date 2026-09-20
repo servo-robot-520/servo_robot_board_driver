@@ -1,9 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/3 11:55
 //! Frame format definition
 
 use crate::error::FrameError;
@@ -18,38 +12,40 @@ use crate::log::LogMessage;
 use crate::power::PowerData;
 use crate::request::Request;
 use crate::response::Response;
-/// 帧头
+
+/// Frame header
 pub const FRAME_HEAD: u8 = 0xAA;
 
-/// 帧头长度 (HEAD + TYPE + LEN)
+/// Frame header length (HEAD + TYPE + LEN)
 const FRAME_HEADER_SIZE: usize = 4;
-/// CRC 长度
+/// CRC length
 const FRAME_CRC_SIZE: usize = 2;
-/// Payload 协议上限(协议文档约定 0~255B;LEN 虽是 u16,超限帧一律拒绝,
-/// 同时限制 decode 侧的单帧分配)
+/// Payload protocol limit (the protocol document specifies 0~255B; although LEN is u16,
+/// frames exceeding the limit will be rejected,
+/// and the allocation of single frames on the decode side will also be limited).
 pub const MAX_PAYLOAD_SIZE: usize = 255;
 
 /// 帧类型枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FrameType {
-    // ═══ 上行 (STM32 → PC, 固件主动推送) ═══
+    // ═══ Uplink (STM32 → PC, firmware actively pushed) ═══
     Imu = 0x01,
     Power = 0x02,
-    // 0x03 保留（原 Thermal，已合并到 Diagnostic）
+    // 0x03 Retain (formerly Thermal, now merged into Diagnostic).
     Config = 0x04,
     Battery = 0x05,
     Diagnostic = 0x06,
     Event = 0x07,
     Log = 0x08,
 
-    // ═══ 下行 (PC → STM32) ═══
+    // ═══ Downlink (PC → STM32) ═══
     Request = 0x80,
 
-    // ═══ 应答 (STM32 → PC) ═══
+    // ═══ Response (STM32 → PC) ═══
     Response = 0xC0,
 
-    // ═══ 未知类型 ═══
+    // ═══ Unknown type ═══
     Unknown(u8),
 }
 
@@ -58,7 +54,6 @@ impl FrameType {
         match v {
             0x01 => Self::Imu,
             0x02 => Self::Power,
-            // 0x03 保留（原 Thermal，已合并到 Diagnostic）
             0x04 => Self::Config,
             0x05 => Self::Battery,
             0x06 => Self::Diagnostic,
@@ -139,7 +134,7 @@ pub struct RawFrame {
 }
 
 impl RawFrame {
-    /// 从字节缓冲区解码一帧
+    /// Decode a frame from the byte buffer
     pub fn decode(buf: &[u8]) -> Result<(Self, usize), FrameError> {
         let header_pos = buf
             .iter()
@@ -155,7 +150,7 @@ impl RawFrame {
         let frame_type = FrameType::from_u8(buf[header_pos + 1]);
         let payload_len = u16::from_le_bytes([buf[header_pos + 2], buf[header_pos + 3]]) as usize;
 
-        // 拒绝超限帧(协议上限 255B):损坏/恶意流不能触发大分配
+        // Rejecting overloaded frames (protocol limit 255B): Corrupted/malicious streams cannot trigger large allocations.
         if payload_len > MAX_PAYLOAD_SIZE {
             return Err(FrameError::PayloadTooLarge {
                 max: MAX_PAYLOAD_SIZE,
@@ -197,7 +192,7 @@ impl RawFrame {
         ))
     }
 
-    /// 编码为字节
+    /// Encoded as bytes
     pub fn encode(&self) -> Vec<u8> {
         let payload_len = self.payload.len();
         let total_len = FRAME_HEADER_SIZE + payload_len + FRAME_CRC_SIZE;
@@ -222,20 +217,19 @@ impl RawFrame {
     }
 }
 
-/// 可序列化为帧 payload 的类型
+/// Types that can be serialized into frame payloads
 pub trait ToPayload {
     fn to_payload(&self) -> Vec<u8>;
 }
 
-/// 可从帧 payload 反序列化的类型
+/// Types that can be deserialized from frame payload
 pub trait FromPayload: Sized {
     fn from_payload(payload: &[u8]) -> Result<Self, FrameError>;
 }
 
-/// 类型化帧枚举
+/// Typed Frame Enumeration
 #[derive(Debug, Clone)]
 pub enum TypedFrame {
-    // 上行帧（固件主动推送）
     Imu(ImuData),
     Power(PowerData),
     Config(BoardConfigSnapshot),
@@ -244,10 +238,8 @@ pub enum TypedFrame {
     Event(BoardEvent),
     Log(LogMessage),
 
-    // 下行帧
     Request(Request),
 
-    // 应答帧
     Response(Response),
 }
 
@@ -291,7 +283,6 @@ impl TypedFrame {
 }
 
 impl RawFrame {
-    /// 解析为类型化帧
     pub fn parse_typed(&self) -> Result<TypedFrame, FrameError> {
         TypedFrame::from_raw(self)
     }
@@ -309,7 +300,7 @@ mod tests {
         assert_eq!(FrameType::from_u8(0xFF), FrameType::Unknown(0xFF));
     }
 
-    /// 读取 #[repr(u8)] 枚举的判别值（测试专用）。
+    /// Read the discrimination value of the #[repr(u8)] enumeration (for testing purposes only).
     fn discriminant(v: FrameType) -> u8 {
         unsafe { *(&v as *const FrameType as *const u8) }
     }
@@ -335,7 +326,7 @@ mod tests {
                 v
             );
         }
-        // 关键线上值
+
         assert_eq!(FrameType::Config.as_u8(), 0x04);
         assert_eq!(FrameType::Battery.as_u8(), 0x05);
         assert_eq!(FrameType::Diagnostic.as_u8(), 0x06);
@@ -380,7 +371,7 @@ mod tests {
         assert_eq!(decoded.payload, frame.payload);
     }
 
-    /// LEN 超协议上限(255B)的帧必须被拒绝,不能触发大分配
+    /// Frames exceeding the LEN protocol limit (255B) must be rejected to prevent large allocations from being triggered.
     #[test]
     fn test_decode_rejects_oversized_payload() {
         let mut frame = vec![FRAME_HEAD, FrameType::Imu.as_u8(), 0x2C, 0x01]; // LEN=300 LE

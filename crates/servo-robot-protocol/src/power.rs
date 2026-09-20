@@ -23,8 +23,11 @@ pub struct PowerData {
     pub charge_in_current_ma: u16,
     // Battery voltage
     pub bat_voltage_mv: u16,
-    // Battery current
+    // Battery current, reserved field currently empty
     pub bat_current_ma: i16,
+    pub bat_out1_current_ma: u16,
+    pub bat_out2_current_ma: u16,
+    pub pwr_5v_current_ma: u16,
 }
 
 impl PowerData {
@@ -36,24 +39,33 @@ impl PowerData {
             });
         }
         let mut offset = 0;
-        let servo_voltage = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let servo_voltage_mv = u16::from_le_bytes([data[offset], data[offset + 1]]);
         offset += 2;
-        let servo_current = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let servo_current_ma = u16::from_le_bytes([data[offset], data[offset + 1]]);
         offset += 2;
-        let charge_in_voltage = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let charge_in_voltage_mv = u16::from_le_bytes([data[offset], data[offset + 1]]);
         offset += 2;
-        let charge_in_current = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let charge_in_current_ma = u16::from_le_bytes([data[offset], data[offset + 1]]);
         offset += 2;
-        let bat_voltage = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let bat_voltage_mv = u16::from_le_bytes([data[offset], data[offset + 1]]);
         offset += 2;
-        let bat_current = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        let bat_current_ma = i16::from_le_bytes([data[offset], data[offset + 1]]);
+        offset += 2;
+        let bat_out1_current_ma = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        offset += 2;
+        let bat_out2_current_ma = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        offset += 2;
+        let pwr_5v_current_ma = u16::from_le_bytes([data[offset], data[offset + 1]]);
         Ok(PowerData {
-            servo_voltage_mv: servo_voltage,
-            servo_current_ma: servo_current,
-            charge_in_voltage_mv: charge_in_voltage,
-            charge_in_current_ma: charge_in_current,
-            bat_voltage_mv: bat_voltage,
-            bat_current_ma: bat_current,
+            servo_voltage_mv,
+            servo_current_ma,
+            charge_in_voltage_mv,
+            charge_in_current_ma,
+            bat_voltage_mv,
+            bat_current_ma,
+            bat_out1_current_ma,
+            bat_out2_current_ma,
+            pwr_5v_current_ma,
         })
     }
 
@@ -65,6 +77,9 @@ impl PowerData {
         buf.extend_from_slice(&self.charge_in_current_ma.to_le_bytes());
         buf.extend_from_slice(&self.bat_voltage_mv.to_le_bytes());
         buf.extend_from_slice(&self.bat_current_ma.to_le_bytes());
+        buf.extend_from_slice(&self.bat_out1_current_ma.to_le_bytes());
+        buf.extend_from_slice(&self.bat_out2_current_ma.to_le_bytes());
+        buf.extend_from_slice(&self.pwr_5v_current_ma.to_le_bytes());
         buf
     }
 }
@@ -85,13 +100,16 @@ impl core::fmt::Display for PowerData {
         // Convert u16 (*10) to f32 for display
         write!(
             f,
-            "servo={:.1}V/{:.1}A pd_in={:.1}V/{:.1}A bat={:.1}V/{:.1}A",
+            "servo={:.1}V/{:.1}A pd_in={:.1}V/{:.1}A bat={:.1}V/{:.1}A out1={:.1}A out2={:.1}A 5v={:.1}A",
             self.servo_voltage_mv as f32 / 10.0,
             self.servo_current_ma as f32 / 10.0,
             self.charge_in_voltage_mv as f32 / 10.0,
             self.charge_in_current_ma as f32 / 10.0,
             self.bat_voltage_mv as f32 / 10.0,
-            self.bat_current_ma as f32 / 10.0
+            self.bat_current_ma as f32 / 10.0,
+            self.bat_out1_current_ma as f32 / 10.0,
+            self.bat_out2_current_ma as f32 / 10.0,
+            self.pwr_5v_current_ma as f32 / 10.0,
         )
     }
 }

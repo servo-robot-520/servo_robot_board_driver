@@ -1,6 +1,6 @@
-//! 设备标识与内存布局信息
+//! Device identification and memory layout information
 //!
-//! 静态硬件信息：芯片 ID、固件版本、Flash/RAM 分区大小。
+//! Static hardware information: chip ID, firmware version, hardware version, Flash/RAM partition size.
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
@@ -30,10 +30,10 @@ impl core::fmt::Display for Version {
     }
 }
 
-/// 设备标识与内存布局（静态信息）
+/// Device identification and memory layout (static information)
 ///
-/// 包含 STM32 芯片标识、IMU ID、固件版本和 Flash/RAM 分区大小。
-/// 与 `Diagnostic` 不同，本结构体的数据在运行期间不会变化。
+/// Includes STM32 chip identifier, IMU ID, firmware version, and Flash/RAM partition size.
+/// Unlike `Diagnostic`, the data in this structure does not change during runtime.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
     /// STM32 device ID (DBGMCU.IDCODE)
@@ -42,17 +42,19 @@ pub struct DeviceInfo {
     pub uid: u32,
     /// IMU chip ID
     pub imu_id: u8,
-    /// 固件版本
+    /// firmware version
     pub firmware_version: Version,
-    /// RAM 大小 (KB)
+    /// hardware version
+    pub hardware_version: Version,
+    /// RAM size (KB)
     pub ram_kb: u16,
-    /// Bootloader Flash 大小 (KB)
+    /// Bootloader flash size (KB)
     pub flash_boot_kb: u16,
-    /// Application Flash 大小 (KB)
+    /// Application flash size (KB)
     pub flash_app_kb: u16,
-    /// OTA Temp Flash 大小 (KB)
+    /// OTA temp flash size (KB)
     pub flash_ota_kb: u16,
-    /// User Data Flash 大小 (KB)
+    /// User data flash size (KB)
     pub flash_user_kb: u16,
 }
 
@@ -63,6 +65,7 @@ impl Default for DeviceInfo {
             uid: 0,
             imu_id: 0,
             firmware_version: Version::new(0, 1, 0),
+            hardware_version: Version::new(1, 0, 0),
             ram_kb: 0,
             flash_boot_kb: 0,
             flash_app_kb: 0,
@@ -90,7 +93,9 @@ impl DeviceInfo {
         o += 4;
         let imu_id = data[o];
         o += 1;
-        let version = Version::new(data[o], data[o + 1], data[o + 2]);
+        let firmware_version = Version::new(data[o], data[o + 1], data[o + 2]);
+        o += 3;
+        let hardware_version = Version::new(data[o], data[o + 1], data[o + 2]);
         o += 3;
         let ram_kb = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
@@ -106,7 +111,8 @@ impl DeviceInfo {
             device_id,
             uid,
             imu_id,
-            firmware_version: version,
+            firmware_version,
+            hardware_version,
             ram_kb,
             flash_boot_kb,
             flash_app_kb,
@@ -123,6 +129,9 @@ impl DeviceInfo {
         buf.push(self.firmware_version.major);
         buf.push(self.firmware_version.minor);
         buf.push(self.firmware_version.patch);
+        buf.push(self.hardware_version.major);
+        buf.push(self.hardware_version.minor);
+        buf.push(self.hardware_version.patch);
         buf.extend_from_slice(&self.ram_kb.to_le_bytes());
         buf.extend_from_slice(&self.flash_boot_kb.to_le_bytes());
         buf.extend_from_slice(&self.flash_app_kb.to_le_bytes());
@@ -148,11 +157,12 @@ impl core::fmt::Display for DeviceInfo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "ID={:#06x} UID={:#010x} IMU={:#04x} FW={} RAM={}KB Flash:Boot={} App={} OTA={} User={}KB",
+            "ID={:#06x} UID={:#010x} IMU={:#04x} FW={} HW={} RAM={}KB Flash:Boot={} App={} OTA={} User={}KB",
             self.device_id,
             self.uid,
             self.imu_id,
             self.firmware_version,
+            self.hardware_version,
             self.ram_kb,
             self.flash_boot_kb,
             self.flash_app_kb,

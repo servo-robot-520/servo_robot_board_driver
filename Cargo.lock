@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "servo-robot-driver"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "flume",
  "log",
@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "servo-robot-protocol"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "bitflags 2.13.1",
 ]

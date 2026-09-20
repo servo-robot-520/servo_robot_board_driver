@@ -1,15 +1,8 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/3 11:31
-
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
 use alloc::vec::Vec;
 
-/// IMU 数据
+/// IMU data
 #[derive(Debug, Clone, Default)]
 pub struct ImuData {
     pub accel: [f32; 3],

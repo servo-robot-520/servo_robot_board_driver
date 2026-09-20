@@ -1,15 +1,15 @@
-//! 运行时诊断数据
+//! Runtime diagnostic data
 //!
-//! CPU 占用、内存、错误计数、温度等运行时状态信息。
+//! Runtime status information such as CPU usage, memory usage, error count, and temperature.
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
 use alloc::vec::Vec;
 
-/// 运行时诊断数据（原 SystemInfo 去掉设备标识字段）
+/// Runtime diagnostic data (original SystemInfo, device identifier field removed)
 ///
-/// 包含运行时状态：CPU 占用、堆栈、错误计数、PD 参数、温度等。
-/// 与 `DeviceInfo` 不同，本结构体的数据在运行期间持续变化。
+/// Includes runtime status: CPU usage, stack, error count, PD parameters, temperature, etc.
+/// Unlike `DeviceInfo`, the data in this structure changes continuously during runtime.
 #[derive(Debug, Clone, Default)]
 pub struct Diagnostic {
     /// 运行时间 (s)

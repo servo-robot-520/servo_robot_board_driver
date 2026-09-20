@@ -1,37 +1,38 @@
-//! 请求帧定义
+//! Request Frame Definition
 //!
-//! 所有下行操作统一为 Request 帧，RequestType 首字节区分具体操作类型。
+//! All downlink operations are uniformly represented by a Request frame,
+//! with the first byte of RequestType distinguishing the specific operation type.
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
 use alloc::vec::Vec;
 
-/// 请求类型 — 下行 Request 帧 payload 首字节
+/// Request type — Downlink Request frame payload first byte
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RequestType {
-    // ═══ 系统控制 (0x01~0x0F, fire-and-forget, 无应答) ═══
-    /// 重启 MCU
+    // ═══ System control (0x01~0x0F, fire-and-forget, no response) ═══
+    /// restart MCU
     Reset = 0x01,
-    /// 关机（切断全部电源）
+    /// Power off (disconnect all power)
     Shutdown = 0x02,
-    /// 触发 OTA 更新（bootloader 拷贝 OTA Temp → App 后重启）
+    /// Trigger OTA update (bootloader copies OTA Temp → App and then restarts)
     Ota = 0x03,
 
-    // ═══ 配置/查询 (0x10~0x1F, 需要应答) ═══
-    /// 写入单个配置项
+    // ═══ Configuration/Query (0x10~0x1F, response required) ═══
+    /// Write a single configuration item
     ConfigWrite = 0x10,
-    /// 查询单个配置项
+    /// Query a single configuration item
     ConfigQuery = 0x11,
-    /// 查询所有配置
+    /// Query all configurations
     ConfigQueryAll = 0x12,
-    /// 查询设备标识与内存布局（静态信息）
+    /// Query device identifier and memory layout (static information)
     DeviceInfo = 0x13,
 
-    // ═══ 外设转发 (0x20~0x2F, 需要应答) ═══
-    /// 转发舵机命令
+    // ═══ Peripheral forwarding (0x20~0x2F, response required) ═══
+    /// Forward servo commands
     ServoForward = 0x20,
-    /// 固件更新数据块
+    /// Firmware update data block
     FirmwareUpdate = 0x21,
 }
 
@@ -65,10 +66,10 @@ impl RequestType {
         }
     }
 
-    /// PC 端是否应等待应答
+    /// Should the PC client wait for a response?
     ///
-    /// Reset/Shutdown/Ota 是 fire-and-forget：固件执行后立即重启或断电，
-    /// 应答大概率丢失，PC 端不应阻塞等待。
+    /// Reset/Shutdown/Ota is fire-and-forget: the firmware will immediately reboot or power off after execution.
+    /// the responses are likely to be lost; the PC should not block and wait.
     pub fn expects_response(&self) -> bool {
         !matches!(self, Self::Reset | Self::Shutdown | Self::Ota)
     }
@@ -80,25 +81,25 @@ impl core::fmt::Display for RequestType {
     }
 }
 
-/// Request 帧 — 统一的下行帧结构
+/// Request frame — a unified downlink frame structure
 ///
 /// Wire format: FrameType(0x80) + payload[request_type:1][data:N]
 #[derive(Debug, Clone)]
 pub struct Request {
-    pub kind: RequestType,
-    /// 去掉 kind 首字节后的原始 payload
+    pub request_type: RequestType,
+    /// The original payload after removing the first byte of kind
     pub data: Vec<u8>,
 }
 
 impl Request {
-    pub fn new(kind: RequestType, data: Vec<u8>) -> Self {
-        Self { kind, data }
+    pub fn new(request_type: RequestType, data: Vec<u8>) -> Self {
+        Self { request_type, data }
     }
 
-    /// 纯命令（无额外数据）: Reset, Shutdown, Ota, ConfigQueryAll, DeviceInfo
-    pub fn simple(kind: RequestType) -> Self {
+    /// Pure commands (no additional data): Reset, Shutdown, Ota, ConfigQueryAll, DeviceInfo
+    pub fn simple(request_type: RequestType) -> Self {
         Self {
-            kind,
+            request_type,
             data: Vec::new(),
         }
     }
@@ -107,7 +108,7 @@ impl Request {
 impl ToPayload for Request {
     fn to_payload(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(1 + self.data.len());
-        buf.push(self.kind as u8);
+        buf.push(self.request_type as u8);
         buf.extend_from_slice(&self.data);
         buf
     }
@@ -121,10 +122,10 @@ impl FromPayload for Request {
                 got: 0,
             });
         }
-        let kind =
+        let request_type =
             RequestType::from_u8(payload[0]).ok_or(FrameError::PayloadDecode("Unknown request"))?;
         Ok(Self {
-            kind,
+            request_type,
             data: payload[1..].to_vec(),
         })
     }
@@ -140,7 +141,7 @@ mod tests {
         let payload = req.to_payload();
         assert_eq!(payload, vec![0x01]);
         let decoded = Request::from_payload(&payload).unwrap();
-        assert_eq!(decoded.kind, RequestType::Reset);
+        assert_eq!(decoded.request_type, RequestType::Reset);
         assert!(decoded.data.is_empty());
     }
 
@@ -150,7 +151,7 @@ mod tests {
         let payload = req.to_payload();
         assert_eq!(payload, vec![0x11, 0x10]);
         let decoded = Request::from_payload(&payload).unwrap();
-        assert_eq!(decoded.kind, RequestType::ConfigQuery);
+        assert_eq!(decoded.request_type, RequestType::ConfigQuery);
         assert_eq!(decoded.data, vec![0x10]);
     }
 

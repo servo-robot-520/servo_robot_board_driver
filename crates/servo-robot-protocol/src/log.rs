@@ -1,9 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/5 09:40
 //! Log message
 
 use crate::error::FrameError;
@@ -11,7 +5,7 @@ use crate::frame::{FromPayload, ToPayload};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-/// 日志级别
+/// Log level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum LogLevel {
@@ -24,8 +18,8 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    /// 线值 = 枚举判别值(0~4)。曾缺 `4 => Error` 分支,板级 ERROR 日志
-    /// 会被解码成 `OFF` 并降级为 info 输出。
+    /// Line value = enumerated discrimination value (0~4). Previously missing `4 => Error` branch, board-level ERROR log.
+    /// It will be decoded as `OFF` and downgraded to info output.
     pub fn from_u8(v: u8) -> Self {
         match v {
             0 => LogLevel::OFF,
@@ -50,10 +44,10 @@ impl core::fmt::Display for LogLevel {
     }
 }
 
-/// 日志消息
+/// Log messages
 ///
-/// Payload 格式: `[level:1][file_name\0][fun_name\0][msg...]`
-/// file_name 和 fun_name 以 null 结尾，msg 取剩余全部字节（UTF-8）
+/// Payload format: `[level:1][file_name\0][fun_name\0][msg...]`
+/// The file_name and fun_name are null-terminated, and msg takes all remaining bytes (UTF-8).
 #[derive(Debug, Clone, Default)]
 pub struct LogMessage {
     pub level: LogLevel,
@@ -74,7 +68,7 @@ impl LogMessage {
         let level = LogLevel::from_u8(data[0]);
         let rest = &data[1..];
 
-        // 查找第一个 null 分隔 file_name
+        // Find the first null-separated for file_name
         let file_end = rest
             .iter()
             .position(|&b| b == 0)
@@ -87,7 +81,7 @@ impl LogMessage {
 
         let rest = &rest[file_end + 1..];
 
-        // 查找第二个 null 分隔 fun_name
+        // Find the second null separator for fun_name
         let fun_end = rest
             .iter()
             .position(|&b| b == 0)
@@ -98,7 +92,7 @@ impl LogMessage {
             .map_err(|_| FrameError::PayloadDecode("invalid utf8 in fun_name"))?
             .to_string();
 
-        // 剩余为 msg
+        // The remaining text is msg
         let msg_bytes = &rest[fun_end + 1..];
         let msg = core::str::from_utf8(msg_bytes)
             .map_err(|_| FrameError::PayloadDecode("invalid utf8 in msg"))?
@@ -201,7 +195,7 @@ mod tests {
         assert_eq!(log.msg, "");
     }
 
-    /// Error=4 必须解码为 Error(曾落进 `_ => OFF`,板级 ERROR 日志被降级)
+    /// Error=4 must be decoded to Error (previously fell into `_ => OFF`, board-level ERROR log was downgraded).
     #[test]
     fn test_log_level_error_roundtrip() {
         assert_eq!(LogLevel::from_u8(4), LogLevel::Error);
@@ -216,7 +210,7 @@ mod tests {
         assert_eq!(decoded.msg, "bus fault");
     }
 
-    /// 全部线值映射
+    /// value mapping
     #[test]
     fn test_log_level_from_u8_all() {
         assert_eq!(LogLevel::from_u8(0), LogLevel::OFF);

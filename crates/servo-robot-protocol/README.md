@@ -23,11 +23,11 @@ servo-robot-protocol = { path = "../servo-robot-protocol" }
 
 # 方式二：GitHub 引用
 [dependencies]
-servo-robot-protocol = { git = "https://github.com/greenhand520/servo_robot_board_driver", branch = "main" }
+servo-robot-protocol = { git = "https://github.com/servo-robot-520/servo_robot_board_driver.git", branch = "main" }
 
 # 嵌入式模式（no_std）
 [dependencies]
-servo-robot-protocol = { git = "https://github.com/greenhand520/servo_robot_board_driver", branch = "main", default-features = false, features = ["embedded"] }
+servo-robot-protocol = { git = "https://github.com/servo-robot-520/servo_robot_board_driver.git", branch = "main", default-features = false, features = ["embedded"] }
 ```
 
 ## 帧格式
@@ -162,7 +162,7 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 
 ### PowerData
 
-电源电气测量。payload 长度 12 字节。
+电源电气测量。payload 长度 18 字节（9 × u16）。
 
 | 字段 | 类型 | 单位 | 说明 |
 |-------|------|------|-------------|
@@ -172,6 +172,9 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 | charge_in_current_ma | u16 | mA | USB-PD 输入电流 |
 | bat_voltage_mv | u16 | mV | 电池电压 |
 | bat_current_ma | i16 | mA | 电池电流（+ 充电，- 放电）|
+| bat_out1_current_ma | u16 | mA | 电池输出1电流 |
+| bat_out2_current_ma | u16 | mA | 电池输出2电流 |
+| pwr_5v_current_ma | u16 | mA | 5V 输出电流 |
 
 ### BatteryState
 
@@ -195,7 +198,7 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 
 ### DeviceInfo
 
-设备标识与内存布局（静态信息）。payload 长度 20 字节。通过 `RequestType::DeviceInfo` 按需查询，数据在运行期间不会变化。
+设备标识与内存布局（静态信息）。payload 长度 21 字节。通过 `RequestType::DeviceInfo` 按需查询，数据在运行期间不会变化。
 
 | 字段 | 类型 | 单位 | 说明 |
 |-------|------|------|-------------|
@@ -203,6 +206,7 @@ IMU 惯性测量数据。payload 长度 56 字节（13 × f32 + u32）。
 | uid | u32 | - | STM32 唯一 ID |
 | imu_id | u8 | - | IMU 芯片 ID |
 | firmware_version | Version | - | 固件版本（含 major/minor/patch）|
+| hardware_version | Version | - | 硬件版本（含 major/minor/patch）|
 | ram_kb | u16 | KB | RAM 大小 |
 | flash_boot_kb | u16 | KB | Bootloader Flash 大小 |
 | flash_app_kb | u16 | KB | Application Flash 大小 |
@@ -281,9 +285,9 @@ bitflags! {
     pub struct StateChangeFlags: u16 {
         const CHARGER_CONNECTED = 1 << 0;
         const FAN_ENABLED       = 1 << 1;
-        const SERVO_POWER_ON    = 1 << 2;
-        const POWER_5V_ON       = 1 << 3;
-        const BAT_EXT_OUT_ON    = 1 << 4;
+        const ENABLE_BAT_OUT1   = 1 << 2;
+        const ENABLE_BAT_OUT2   = 1 << 3;
+        const PWR_5V_ON         = 1 << 4;
     }
 }
 ```
@@ -293,12 +297,17 @@ bitflags! {
 ```rust
 bitflags! {
     pub struct ProtectionFlags: u16 {
-        const SERVO_OVERCURRENT = 1 << 0;
-        const SERVO_THERMAL     = 1 << 1;
-        const DCDC_5V_THERMAL   = 1 << 2;
-        const CHARGE_DERATING   = 1 << 3;
-        const CHARGE_THERMAL    = 1 << 4;
-        const BATTERY_LOW       = 1 << 5;
+        const BAT_OVERCURRENT       = 1 << 0;
+        const PWR_SERVO_OVERCURRENT = 1 << 1;
+        const PWR_5V_OVERCURRENT    = 1 << 2;
+        const BAT_OUT1_OVERCURRENT  = 1 << 3;
+        const BAT_OUT2_OVERCURRENT  = 1 << 4;
+        const BAT_THERMAL           = 1 << 5;
+        const PWR_SERVO_THERMAL     = 1 << 6;
+        const PWR_5V_THERMAL        = 1 << 7;
+        const CHARGE_DERATING       = 1 << 8;
+        const CHARGE_THERMAL        = 1 << 9;
+        const BATTERY_LOW           = 1 << 10;
     }
 }
 ```
@@ -329,21 +338,23 @@ pub struct EventLog {
     pub kind: EventKind,   // 事件类型
 }
 
-/// 事件类型（32 个变体）
+/// 事件类型（35 个变体）
 pub enum EventKind {
-    // 充电事件
+    // 充电事件 (7)
     NotCharging, PreCharge, CcCharge, CvCharge, FullCharge,
     PdSinkFault, UnsupportedCharger,
-    // 保护事件
-    ServoOvercurrent, PowerServoThermal, Power5vThermal,
+    // 保护事件 (11)
+    BatOvercurrent, PwrServerOvercurrent, Pwr5VOvercurrent,
+    BatOut1Overcurrent, BatOut2Overcurrent,
+    BatThermal, PwrServoThermal, Pwr5vThermal,
     ChargeDerating, ChargeThermal, BatteryLow,
-    // 错误事件
+    // 错误事件 (8)
     UnknownError, Uart1Error, Uart2Error, I2c1Error, I2c3Error,
     Spi1Error, UsbError, DmaError,
-    // 状态变化事件
+    // 状态变化事件 (10)
     ChargerConnected, ChargerDisconnected, FanOn, FanOff,
-    PowerServoOn, PowerServoOff, Power5vOn, Power5vOff,
-    BatExtOutOn, BatExtOutOff,
+    BatOut1On, BatOut1Off, Pwr5vOn, Pwr5vOff,
+    BatOut2On, BatOut2Off,
 }
 
 /// 事件分类（4 类）
@@ -371,45 +382,91 @@ pub enum EventCategory {
 
 ### 配置类型
 
+#### 开关类（0x10~0x13）
+
 | 类型 | 值 | 说明 |
 |------|-------|-------------|
-| SwitchServoPower | 0x10 | 舵机电源开关 |
-| Switch5VPower | 0x11 | 5V 电源开关 |
-| SwitchCharge | 0x12 | 充电开关 |
-| SwitchBatExtOut | 0x13 | 电池外部输出开关 |
-| ChargeStopSoc | 0x20 | 充电停止 SOC (%) |
-| TxLogLevel | 0x21 | STM32 发送日志等级 |
-| PowerServoCurrentLimitMa | 0x30 | 舵机电流限制 (mA) |
-| PowerServoTempLimit | 0x31 | 舵机温度限制 (×10) |
-| Power5vTempLimit | 0x32 | 5V 温度限制 (×10) |
-| ChargeMaxCurrentMa | 0x33 | 最大充电电流 (mA) |
-| ChargeTempDerating | 0x34 | 充电降额温度 (×10) |
-| ChargeTempLimit | 0x35 | 充电停止温度 (×10) |
-| ChargeStopVoltageMv | 0x36 | 充电停止电压 (mV) |
-| ServoBaudRate | 0x37 | 舵机通信波特率 (u32) |
+| EnableBatOut1 | 0x10 | 舵机电源开关 |
+| EnableBatOut2 | 0x11 | 电池外部输出开关 |
+| EnablePwr5V | 0x12 | 5V 电源开关 |
+| EnableCharge | 0x13 | 充电开关 |
+
+#### 电流限制类（0x20~0x25）
+
+| 类型 | 值 | 单位 | 说明 |
+|------|-------|------|-------------|
+| PwrBatOut1CurrentLimitMa | 0x20 | mA | 电池输出1电流限制 |
+| PwrBatOut2CurrentLimitMa | 0x21 | mA | 电池输出2电流限制 |
+| Pwr5VOutCurrentLimitMa | 0x22 | mA | 5V 输出电流限制 |
+| PwrServoCurrentLimitMa | 0x23 | mA | 舵机电源输出电流限制 |
+| ChargeMinCurrentMa | 0x24 | mA | 最小充电电流 |
+| ChargeMaxCurrentMa | 0x25 | mA | 最大充电电流 |
+
+#### 温度限制类（0x30~0x33）
+
+| 类型 | 值 | 单位 | 说明 |
+|------|-------|------|-------------|
+| PwrServoTempLimit | 0x30 | ×10 | 舵机电源温度限制 |
+| Pwr5vTempLimit | 0x31 | ×10 | 5V 电源温度限制 |
+| ChargeTempDerating | 0x32 | ×10 | 充电降额温度阈值 |
+| ChargeTempLimit | 0x33 | ×10 | 充电停止温度 |
+
+#### 杂项（0x40~0x45）
+
+| 类型 | 值 | 单位 | 说明 |
+|------|-------|------|-------------|
+| ServoBaudRate | 0x40 | baud | 舵机通信波特率 (u32)，设为 0 禁用 |
+| ChargeStopSoc | 0x41 | % | 充电停止 SOC |
+| ChargeStopVoltageMv | 0x42 | mV | 充电停止电压 |
+| TxLogLevel | 0x43 | - | STM32 发送日志等级 |
+| BMSIc | 0x44 | - | BMS IC 类型 (0=NaN, 1=BQ40Z50, 2=BQ28Z10) |
+| IMUIc | 0x45 | - | IMU IC 类型 (0=NaN, 1=MPU6500, 2=MPU6050) |
 
 > **注意**：配置读写通过 `Request` 帧（`RequestType::ConfigWrite` / `ConfigQuery` / `ConfigQueryAll`）进行，应答通过 `Response` 帧返回。
 
 ### BoardConfigSnapshot
 
-板级配置快照，用于查询和显示当前配置状态。payload 长度 24 字节（4 bool + 2 u8 + 7 u16 + 1 u32）。
+板级配置快照，用于查询和显示当前配置状态。payload 长度 34 字节（4 bool + 4 u8 + 11 u16 + 1 u32）。
+
+#### 开关（0x10~0x13）
+
+| 字段 | 类型 | 默认值 | 说明 |
+|-------|------|---------|-------------|
+| enable_bat_ou1 | bool | true | 电池输出1开关 |
+| enable_bat_out2 | bool | true | 电池输出2开关 |
+| enable_pwr_5v | bool | true | 5V 电源开关 |
+| enable_charge | bool | true | 充电开关 |
+
+#### 电流限制（0x20~0x25）
 
 | 字段 | 类型 | 单位 | 默认值 | 说明 |
 |-------|------|------|---------|-------------|
-| power_servo_on | bool | - | true | 舵机电源开关 |
-| power_5v_on | bool | - | true | 5V 电源开关 |
-| charge_on | bool | - | true | 充电开关 |
-| bat_ext_out_on | bool | - | true | 电池外部输出开关 |
-| charge_stop_percentage | u8 | 1~100 | 100 | 充电停止百分比 |
-| tx_log_level | LogLevel | - | Info | STM32 发送日志等级 |
-| servo_current_limit_ma | u16 | mA | 50 | 舵机电流限制 |
-| servo_temp_limit | u16 | ×10 | 800 | 舵机温度限制 (80.0°C) |
-| temp_5v_limit | u16 | ×10 | 700 | 5V 温度限制 (70.0°C) |
+| bat_out1_current_limit_ma | u16 | mA | 50 | 电池输出1电流限制 |
+| bat_out2_current_limit_ma | u16 | mA | 0 | 电池输出2电流限制 |
+| pwr_5v_out_current_limit_ma | u16 | mA | 0 | 5V 输出电流限制 |
+| servo_out_current_limit_ma | u16 | mA | 0 | 舵机电源输出电流限制 |
+| charge_min_current_ma | u16 | mA | 0 | 最小充电电流 |
 | charge_max_current_ma | u16 | mA | 90 | 最大充电电流 |
+
+#### 温度限制（0x30~0x33）
+
+| 字段 | 类型 | 单位 | 默认值 | 说明 |
+|-------|------|------|---------|-------------|
+| power_servo_temp_limit | u16 | ×10 | 800 | 舵机电源温度限制 (80.0°C) |
+| power_5v_temp_limit | u16 | ×10 | 700 | 5V 电源温度限制 (70.0°C) |
 | charge_temp_derating | u16 | ×10 | 600 | 充电降额温度 (60.0°C) |
 | charge_temp_limit | u16 | ×10 | 700 | 充电停止温度 (70.0°C) |
-| charge_stop_voltage_mv | u16 | mV | 168 | 充电停止电压 |
+
+#### 杂项（0x40~0x45）
+
+| 字段 | 类型 | 单位 | 默认值 | 说明 |
+|-------|------|------|---------|-------------|
 | servo_baud_rate | u32 | baud | 115200 | 舵机通信波特率 |
+| charge_stop_percentage | u8 | 1~100 | 100 | 充电停止百分比 |
+| charge_stop_voltage_mv | u16 | mV | 168 | 充电停止电压 |
+| tx_log_level | LogLevel | - | Info | STM32 发送日志等级 |
+| bms_ic | u8 | - | 0 | BMS IC 类型 (0=NaN, 1=BQ40Z50, 2=BQ28Z10) |
+| imu_ic | u8 | - | 0 | IMU IC 类型 (0=NaN, 1=MPU6500, 2=MPU6050) |
 
 ### ServoCmdWrapper
 

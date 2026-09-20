@@ -40,3 +40,34 @@ macro_rules! enum_from_u8 {
         }
     };
 }
+
+#[macro_export]
+macro_rules! enum_with_from_u8 {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $( $variant:ident = $val:expr => $display:expr ),+ $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[repr(u8)]
+        $vis enum $name {
+            $( $variant = $val, )+
+        }
+
+        impl $name {
+            pub fn from_u8(v: u8) -> Option<Self> {
+                match v {
+                    $( $val => Some(Self::$variant), )+
+                    _ => None,
+                }
+            }
+
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $( Self::$variant => $display, )+
+                }
+            }
+        }
+    };
+}

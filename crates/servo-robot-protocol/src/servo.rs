@@ -1,10 +1,3 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version:
-//! # Date
-//! 2026/7/8 11:52
-
 //! Commands to operate servos are only packaged with commands, without any other processing
 
 use crate::error::FrameError;
