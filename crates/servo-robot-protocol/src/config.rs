@@ -59,6 +59,18 @@ impl ConfigType {
         }
     }
 
+    /// 是否开关类配置（1 字节 bool，取值 on/off）
+    pub fn is_switch(&self) -> bool {
+        matches!(
+            self,
+            Self::EnableBatOut1
+                | Self::EnablePwrBatOut2
+                | Self::EnablePwr5V
+                | Self::EnableCharge
+                | Self::EnableServoPwrMonitor
+        )
+    }
+
     /// 值 payload 大小(不含 type 字节)。当前所有 ConfigType 都有值 payload,
     /// 保留 `Option` 以便未来加入无值命令(Reset/Shutdown 类)。
     pub fn value_size(&self) -> Option<usize> {
@@ -777,5 +789,37 @@ mod tests {
         assert_eq!(decoded.servo_baud_rate, 921600);
         assert_eq!(decoded.bms_ic, 1);
         assert_eq!(decoded.imu_ic, 2);
+    }
+
+    /// ALL 覆盖全部变体，且 from_u8 / from_name / variant_name 两两自洽
+    #[test]
+    fn test_config_type_all_and_name_lookup() {
+        assert_eq!(ConfigType::ALL.len(), 21);
+        for ct in ConfigType::ALL {
+            assert_eq!(ConfigType::from_u8(*ct as u8), Some(*ct));
+            assert_eq!(ConfigType::from_name(ct.variant_name()), Some(*ct));
+            // 显示名同样可解析（大小写不敏感）
+            assert_eq!(ConfigType::from_name(ct.name()), Some(*ct));
+            assert_eq!(ConfigType::from_name(&ct.name().to_uppercase()), Some(*ct));
+        }
+        assert_eq!(ConfigType::from_name("NotAConfigType"), None);
+        assert_eq!(ConfigType::from_u8(0xFF), None);
+    }
+
+    /// 开关类恰好 5 项，与 value_size()==1 且非数值开关区分开
+    #[test]
+    fn test_config_type_is_switch() {
+        let switches: Vec<ConfigType> = ConfigType::ALL
+            .iter()
+            .copied()
+            .filter(|ct| ct.is_switch())
+            .collect();
+        assert_eq!(switches.len(), 5);
+        assert!(ConfigType::EnableServoPwrMonitor.is_switch());
+        // 1 字节数值配置不是开关
+        assert!(!ConfigType::ChargeStopSoc.is_switch());
+        assert!(!ConfigType::TxLogLevel.is_switch());
+        assert!(!ConfigType::BMSIc.is_switch());
+        assert!(!ConfigType::PwrServoCurrentLimitMa.is_switch());
     }
 }

@@ -56,16 +56,38 @@ macro_rules! enum_with_from_u8 {
         }
 
         impl $name {
+            /// 全部变体（声明顺序），供遍历/CLI 列举使用
+            pub const ALL: &'static [$name] = &[$(Self::$variant),+];
+
             pub fn from_u8(v: u8) -> Option<Self> {
                 match v {
-                    $( $val => Some(Self::$variant), )+
+                    $( $val => Some(Self::$variant),)+
                     _ => None,
                 }
+            }
+
+            /// 按变体名（`stringify!`）或显示名解析，大小写不敏感
+            pub fn from_name(name: &str) -> Option<Self> {
+                $(
+                    if name.eq_ignore_ascii_case(stringify!($variant))
+                        || name.eq_ignore_ascii_case($display)
+                    {
+                        return Some(Self::$variant);
+                    }
+                )+
+                None
             }
 
             pub fn name(&self) -> &'static str {
                 match self {
                     $( Self::$variant => $display, )+
+                }
+            }
+
+            /// 变体名（如 `EnableCharge`），与 `from_name` 的输入一致
+            pub fn variant_name(&self) -> &'static str {
+                match self {
+                    $( Self::$variant => stringify!($variant), )+
                 }
             }
         }
