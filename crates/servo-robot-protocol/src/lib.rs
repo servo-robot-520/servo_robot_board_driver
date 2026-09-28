@@ -1,6 +1,6 @@
-//! servo-robot-protocol - STM32 Definition of communication protocols
+//! servo-robot-protocol - STM32 通信协议定义
 //!
-//! Supports no_std + alloc, available for PC and embedded platforms.
+//! 支持 no_std + alloc，适用于 PC 和嵌入式平台。
 
 #![cfg_attr(not(feature = "std"), no_std)]
 

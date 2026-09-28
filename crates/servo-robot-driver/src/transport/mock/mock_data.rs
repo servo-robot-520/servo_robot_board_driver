@@ -146,8 +146,8 @@ impl PowerSimulator {
             if self.charging { 1.5 } else { -1.0 } + rng.random_range(-0.5f32..0.5f32);
 
         crate::protocol::power::PowerData {
-            servo_voltage_mv: (servo_voltage * 10.0) as u16,
-            servo_current_ma: (servo_current * 10.0) as u16,
+            pwr_servo_voltage_mv: (servo_voltage * 10.0) as u16,
+            pwr_servo_current_ma: (servo_current * 10.0) as u16,
             charge_in_voltage_mv: (charge_voltage * 10.0) as u16,
             charge_in_current_ma: (charge_current.max(0.0) * 10.0) as u16,
             bat_voltage_mv: (bat_voltage * 10.0) as u16,
@@ -155,6 +155,7 @@ impl PowerSimulator {
             bat_out1_current_ma: (servo_current * 0.8 * 10.0) as u16,
             bat_out2_current_ma: (servo_current * 0.2 * 10.0) as u16,
             pwr_5v_current_ma: (2.5 * 10.0) as u16,
+            pwr_5v_voltage_mv: (0.51 * 10.0) as u16,
         }
     }
 }

@@ -111,8 +111,8 @@ impl DriverCallback for CffiCallback {
 
     fn on_power_data(&mut self, data: &PowerData) {
         let sr = SrPower {
-            servo_voltage_mv: data.servo_voltage_mv,
-            servo_current_ma: data.servo_current_ma,
+            servo_voltage_mv: data.pwr_servo_voltage_mv,
+            servo_current_ma: data.pwr_servo_current_ma,
             charge_in_voltage_mv: data.charge_in_voltage_mv,
             charge_in_current_ma: data.charge_in_current_ma,
             bat_voltage_mv: data.bat_voltage_mv,
@@ -120,6 +120,7 @@ impl DriverCallback for CffiCallback {
             bat_out1_current_ma: data.bat_out1_current_ma,
             bat_out2_current_ma: data.bat_out2_current_ma,
             pwr_5v_current_ma: data.pwr_5v_current_ma,
+            pwr_5v_voltage_mv: data.pwr_5v_voltage_mv,
         };
         self.with_table(|cb| {
             if let Some(f) = cb.on_power_data {

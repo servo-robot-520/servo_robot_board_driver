@@ -1,10 +1,4 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/3 11:40
-//! Event types
+//! 事件类型
 
 use crate::error::FrameError;
 use crate::frame::{FromPayload, ToPayload};
@@ -13,11 +7,11 @@ use alloc::vec::Vec;
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct StateChangeFlags: u16 {
-        const CHARGER_CONNECTED = 1 << 0;
-        const FAN_ENABLED       = 1 << 1;
-        const ENABLE_BAT_OUT1   = 1 << 2;
-        const ENABLE_BAT_OUT2   = 1 << 3;
-        const PWR_5V_ON       = 1 << 4;
+        const CHARGER_CONNECTED      = 1 << 0;
+        const FAN_ENABLED            = 1 << 1;
+        const BAT_OUT1_ENABLED       = 1 << 2;
+        const BAT_OUT2_ENABLED       = 1 << 3;
+        const PWR_5V_ENABLED         = 1 << 4;
     }
 }
 
@@ -96,69 +90,69 @@ pub enum EventCategory {
 }
 
 /// 状态变化事件映射 (bit, on事件, off事件)
-const STATE_CHANGE_MAPPINGS: &[(u16, EventKind, EventKind)] = &[
+const STATE_CHANGE_MAPPINGS: &[(u16, EventType, EventType)] = &[
     (
         StateChangeFlags::CHARGER_CONNECTED.bits(),
-        EventKind::ChargerConnected,
-        EventKind::ChargerDisconnected,
+        EventType::ChargerConnected,
+        EventType::ChargerDisconnected,
     ),
     (
         StateChangeFlags::FAN_ENABLED.bits(),
-        EventKind::FanOn,
-        EventKind::FanOff,
+        EventType::FanOn,
+        EventType::FanOff,
     ),
     (
-        StateChangeFlags::ENABLE_BAT_OUT1.bits(),
-        EventKind::BatOut1On,
-        EventKind::BatOut2Off,
+        StateChangeFlags::BAT_OUT1_ENABLED.bits(),
+        EventType::BatOut1On,
+        EventType::BatOut1Off,
     ),
     (
-        StateChangeFlags::PWR_5V_ON.bits(),
-        EventKind::Pwr5vOn,
-        EventKind::Pwr5vOff,
+        StateChangeFlags::BAT_OUT2_ENABLED.bits(),
+        EventType::BatOut2On,
+        EventType::BatOut2Off,
     ),
     (
-        StateChangeFlags::ENABLE_BAT_OUT2.bits(),
-        EventKind::BatOut1On,
-        EventKind::BatOut2Off,
+        StateChangeFlags::PWR_5V_ENABLED.bits(),
+        EventType::Pwr5vOn,
+        EventType::Pwr5vOff,
     ),
 ];
 
 /// 保护事件映射 (bit, 事件)
-const PROTECTION_MAPPINGS: &[(u16, EventKind)] = &[
+const PROTECTION_MAPPINGS: &[(u16, EventType)] = &[
     (
         ProtectionFlags::PWR_SERVO_OVERCURRENT.bits(),
-        EventKind::PwrServerOvercurrent,
+        EventType::PwrServerOvercurrent,
     ),
     (
         ProtectionFlags::PWR_SERVO_THERMAL.bits(),
-        EventKind::PwrServoThermal,
+        EventType::PwrServoThermal,
     ),
     (
         ProtectionFlags::PWR_5V_THERMAL.bits(),
-        EventKind::Pwr5vThermal,
+        EventType::Pwr5vThermal,
     ),
     (
         ProtectionFlags::CHARGE_DERATING.bits(),
-        EventKind::ChargeDerating,
+        EventType::ChargeDerating,
     ),
     (
         ProtectionFlags::CHARGE_THERMAL.bits(),
-        EventKind::ChargeThermal,
+        EventType::ChargeThermal,
     ),
-    (ProtectionFlags::BATTERY_LOW.bits(), EventKind::BatteryLow),
+    (ProtectionFlags::BATTERY_LOW.bits(), EventType::BatteryLow),
 ];
 
 /// 错误事件映射 (bit, 事件)
-const ERROR_MAPPINGS: &[(u16, EventKind)] = &[
-    (ErrorFlags::UNKNOWN_ERROR.bits(), EventKind::UnknownError),
-    (ErrorFlags::UART1_ERROR.bits(), EventKind::Uart1Error),
-    (ErrorFlags::UART2_ERROR.bits(), EventKind::Uart2Error),
-    (ErrorFlags::I2C1_ERROR.bits(), EventKind::I2c1Error),
-    (ErrorFlags::I2C3_ERROR.bits(), EventKind::I2c3Error),
-    (ErrorFlags::SPI1_ERROR.bits(), EventKind::Spi1Error),
-    (ErrorFlags::USB_ERROR.bits(), EventKind::UsbError),
-    (ErrorFlags::DMA_ERROR.bits(), EventKind::DmaError),
+const ERROR_MAPPINGS: &[(u16, EventType)] = &[
+    (ErrorFlags::UNKNOWN_ERROR.bits(), EventType::UnknownError),
+    (ErrorFlags::UART1_ERROR.bits(), EventType::Uart1Error),
+    (ErrorFlags::UART2_ERROR.bits(), EventType::Uart2Error),
+    (ErrorFlags::I2C1_ERROR.bits(), EventType::I2c1Error),
+    (ErrorFlags::I2C3_ERROR.bits(), EventType::I2c3Error),
+    (ErrorFlags::SPI1_ERROR.bits(), EventType::Spi1Error),
+    (ErrorFlags::USB_ERROR.bits(), EventType::UsbError),
+    (ErrorFlags::DMA_ERROR.bits(), EventType::DmaError),
 ];
 
 // ═══ 事件类型 ═══
@@ -167,13 +161,13 @@ const ERROR_MAPPINGS: &[(u16, EventKind)] = &[
 #[derive(Debug, Clone)]
 pub struct EventLog {
     pub ts: u64,
-    pub kind: EventKind,
+    pub kind: EventType,
 }
 
 /// 事件类型
-#[derive(Debug, Clone)]
-pub enum EventKind {
-    // Charging event
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventType {
+    // 充电事件
     NotCharging = 0,
     PreCharge,
     CcCharge,
@@ -181,7 +175,7 @@ pub enum EventKind {
     FullCharge,
     PdSinkFault,
     UnsupportedCharger,
-    // Protect the event
+    // 保护事件
     BatOvercurrent,
     PwrServerOvercurrent,
     Pwr5VOvercurrent,
@@ -193,7 +187,7 @@ pub enum EventKind {
     ChargeDerating,
     ChargeThermal,
     BatteryLow,
-    // Error event
+    // 错误事件
     UnknownError,
     Uart1Error,
     Uart2Error,
@@ -202,7 +196,7 @@ pub enum EventKind {
     Spi1Error,
     UsbError,
     DmaError,
-    // Status changes event
+    // 状态变化事件
     ChargerConnected,
     ChargerDisconnected,
     FanOn,
@@ -215,21 +209,21 @@ pub enum EventKind {
     BatOut2Off,
 }
 
-impl From<ChargePhase> for EventKind {
+impl From<ChargePhase> for EventType {
     fn from(phase: ChargePhase) -> Self {
         match phase {
-            ChargePhase::NotCharging => EventKind::NotCharging,
-            ChargePhase::PreCharge => EventKind::PreCharge,
-            ChargePhase::Cc => EventKind::CcCharge,
-            ChargePhase::Cv => EventKind::CvCharge,
-            ChargePhase::Full => EventKind::FullCharge,
-            ChargePhase::PdSinkFault => EventKind::PdSinkFault,
-            ChargePhase::UnsupportedCharger => EventKind::UnsupportedCharger,
+            ChargePhase::NotCharging => EventType::NotCharging,
+            ChargePhase::PreCharge => EventType::PreCharge,
+            ChargePhase::Cc => EventType::CcCharge,
+            ChargePhase::Cv => EventType::CvCharge,
+            ChargePhase::Full => EventType::FullCharge,
+            ChargePhase::PdSinkFault => EventType::PdSinkFault,
+            ChargePhase::UnsupportedCharger => EventType::UnsupportedCharger,
         }
     }
 }
 
-impl core::fmt::Display for EventKind {
+impl core::fmt::Display for EventType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NotCharging => write!(f, "NOT_CHARGING"),
@@ -272,7 +266,7 @@ impl core::fmt::Display for EventKind {
     }
 }
 
-impl EventKind {
+impl EventType {
     /// 事件分类（用于 UI 显示 emoji 和颜色）
     pub fn category(&self) -> EventCategory {
         match self {
@@ -378,7 +372,7 @@ impl BoardEvent {
     }
 
     /// 与前一状态对比，提取所有新增/变化事件
-    pub fn diff_events(&self, prev: &BoardEvent) -> Vec<EventKind> {
+    pub fn diff_events(&self, prev: &BoardEvent) -> Vec<EventType> {
         let mut events = Vec::new();
 
         if self.charge_phase != prev.charge_phase {
@@ -419,7 +413,7 @@ impl BoardEvent {
     }
 
     /// 仅提取新增状态变化事件（含 Charger）
-    pub fn new_state_change_events(&self, prev: &StateChangeFlags) -> Vec<EventKind> {
+    pub fn new_state_change_events(&self, prev: &StateChangeFlags) -> Vec<EventType> {
         let changed = self.state_change_flags.bits() ^ prev.bits();
         STATE_CHANGE_MAPPINGS
             .iter()
@@ -435,7 +429,7 @@ impl BoardEvent {
     }
 
     /// 仅提取新增保护事件
-    pub fn new_protection_events(&self, prev: &ProtectionFlags) -> Vec<EventKind> {
+    pub fn new_protection_events(&self, prev: &ProtectionFlags) -> Vec<EventType> {
         let new = self.protection_flags.bits() & !prev.bits();
         PROTECTION_MAPPINGS
             .iter()
@@ -445,7 +439,7 @@ impl BoardEvent {
     }
 
     /// 仅提取新增错误事件
-    pub fn new_error_events(&self, prev: &ErrorFlags) -> Vec<EventKind> {
+    pub fn new_error_events(&self, prev: &ErrorFlags) -> Vec<EventType> {
         let new = self.error_flags.bits() & !prev.bits();
         ERROR_MAPPINGS
             .iter()
@@ -535,5 +529,50 @@ mod tests {
         assert_eq!(decoded.state_change_flags, e.state_change_flags);
         assert_eq!(decoded.protection_flags, e.protection_flags);
         assert_eq!(decoded.error_flags, e.error_flags);
+    }
+
+    /// 每个状态变化标志位恰好映射一条,on/off 成对且属于同一路开关
+    #[test]
+    fn test_state_change_mappings_pairing() {
+        let expect = [
+            (
+                StateChangeFlags::CHARGER_CONNECTED,
+                EventType::ChargerConnected,
+                EventType::ChargerDisconnected,
+            ),
+            (
+                StateChangeFlags::FAN_ENABLED,
+                EventType::FanOn,
+                EventType::FanOff,
+            ),
+            (
+                StateChangeFlags::BAT_OUT1_ENABLED,
+                EventType::BatOut1On,
+                EventType::BatOut1Off,
+            ),
+            (
+                StateChangeFlags::BAT_OUT2_ENABLED,
+                EventType::BatOut2On,
+                EventType::BatOut2Off,
+            ),
+            (
+                StateChangeFlags::PWR_5V_ENABLED,
+                EventType::Pwr5vOn,
+                EventType::Pwr5vOff,
+            ),
+        ];
+        assert_eq!(STATE_CHANGE_MAPPINGS.len(), expect.len());
+        for (flag, on, off) in expect {
+            let entry = STATE_CHANGE_MAPPINGS
+                .iter()
+                .find(|(bit, ..)| *bit == flag.bits())
+                .unwrap_or_else(|| panic!("flag {:#x} has no mapping", flag.bits()));
+            assert_eq!(
+                (&entry.1, &entry.2),
+                (&on, &off),
+                "flag {:#x} mis-paired",
+                flag.bits()
+            );
+        }
     }
 }

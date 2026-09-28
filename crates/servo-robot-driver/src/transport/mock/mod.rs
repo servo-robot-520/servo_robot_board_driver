@@ -135,7 +135,7 @@ mod tests {
 
         let query = Request::new(
             RequestType::ConfigQuery,
-            vec![ConfigType::PwrBatOut1CurrentLimitMa as u8],
+            vec![ConfigType::BatOut1CurrentLimitMa as u8],
         );
         let frame = RawFrame {
             frame_type: FrameType::Request,

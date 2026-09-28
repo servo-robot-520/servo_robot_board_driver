@@ -76,8 +76,8 @@ impl Default for DeviceInfo {
 }
 
 impl DeviceInfo {
-    /// Payload size: 2+4+1+3+2+2+2+2+2 = 20 bytes
-    pub const PAYLOAD_SIZE: usize = 20;
+    /// Payload size: 2+4+1+3+3+2+2+2+2+2 = 23 bytes
+    pub const PAYLOAD_SIZE: usize = 23;
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, FrameError> {
         if data.len() < Self::PAYLOAD_SIZE {

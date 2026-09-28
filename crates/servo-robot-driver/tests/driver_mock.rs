@@ -187,7 +187,7 @@ fn test_driver_query_config_sync() {
     // 等待驱动启动
     std::thread::sleep(Duration::from_millis(100));
 
-    let result = driver.query_config_sync(ConfigType::PwrBatOut1CurrentLimitMa);
+    let result = driver.query_config_sync(ConfigType::BatOut1CurrentLimitMa);
     assert!(
         result.is_ok(),
         "Config query should succeed: {:?}",
@@ -221,7 +221,7 @@ fn test_driver_query_all_configs_sync() {
 
     let config = result.unwrap();
     // Config values are u16 (*10), so 5.0A = 50, 80.0°C = 800
-    assert_eq!(config.servo_current_limit_ma, 50);
+    assert_eq!(config.bat_out1_current_limit_ma, 50);
     assert_eq!(config.pwr_servo_temp_limit, 800);
 
     driver.stop().unwrap();
@@ -235,7 +235,7 @@ fn test_driver_write_config_value_sync() {
     driver.start().unwrap();
     std::thread::sleep(Duration::from_millis(100));
 
-    let result = driver.write_config_sync(Config::PowerServoCurrentLimitMa(100));
+    let result = driver.write_config_sync(Config::PwrServoCurrentLimitMa(100));
     assert!(
         result.is_ok(),
         "Config write should succeed: {:?}",

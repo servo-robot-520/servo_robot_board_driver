@@ -68,7 +68,7 @@ impl LogMessage {
         let level = LogLevel::from_u8(data[0]);
         let rest = &data[1..];
 
-        // Find the first null-separated for file_name
+        // 查找第一个 null 分隔符，提取文件名
         let file_end = rest
             .iter()
             .position(|&b| b == 0)
@@ -81,7 +81,7 @@ impl LogMessage {
 
         let rest = &rest[file_end + 1..];
 
-        // Find the second null separator for fun_name
+        // 查找第二个 null 分隔符，提取函数名
         let fun_end = rest
             .iter()
             .position(|&b| b == 0)
@@ -92,7 +92,7 @@ impl LogMessage {
             .map_err(|_| FrameError::PayloadDecode("invalid utf8 in fun_name"))?
             .to_string();
 
-        // The remaining text is msg
+        // 剩余部分为消息内容
         let msg_bytes = &rest[fun_end + 1..];
         let msg = core::str::from_utf8(msg_bytes)
             .map_err(|_| FrameError::PayloadDecode("invalid utf8 in msg"))?
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_log_minimal() {
-        // level(Info=2) + "\0" + "\0" + "" (empty msg)
+        // level(Info=2) + "\0" + "\0" + "" (空消息)
         let bytes = vec![0x02, 0, 0];
         let log = LogMessage::from_bytes(&bytes).unwrap();
         assert_eq!(log.level, LogLevel::Info);

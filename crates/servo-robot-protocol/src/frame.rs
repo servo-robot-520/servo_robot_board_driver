@@ -150,7 +150,7 @@ impl RawFrame {
         let frame_type = FrameType::from_u8(buf[header_pos + 1]);
         let payload_len = u16::from_le_bytes([buf[header_pos + 2], buf[header_pos + 3]]) as usize;
 
-        // Rejecting overloaded frames (protocol limit 255B): Corrupted/malicious streams cannot trigger large allocations.
+        // 拒绝超大帧（协议限制 255B）：防止损坏/恶意数据流触发大量内存分配。
         if payload_len > MAX_PAYLOAD_SIZE {
             return Err(FrameError::PayloadTooLarge {
                 max: MAX_PAYLOAD_SIZE,

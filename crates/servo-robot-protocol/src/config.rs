@@ -1,10 +1,4 @@
-//! # Authors
-//! greenhand520
-//! # Since
-//! version: 0.1.0
-//! # Date
-//! 2026/7/3 11:30
-//! Board Config
+//! 电源管理主板配置
 
 use crate::enum_with_from_u8;
 use crate::error::FrameError;
@@ -16,13 +10,13 @@ enum_with_from_u8! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ConfigType {
         EnableBatOut1            = 0x10 => "Servo Power",
-        EnableBatOut2            = 0x11 => "Battery Extra Output",
+        EnablePwrBatOut2         = 0x11 => "Battery Extra Output",
         EnablePwr5V              = 0x12 => "5V Power",
         EnableCharge             = 0x13 => "Charge",
-        EnableExtServoPower      = 0x14 => "Ext Servo Power",
+        EnableServoPwrMonitor    = 0x14 => "Servo Power Monitor",
 
-        PwrBatOut1CurrentLimitMa = 0x20 => "Bat Out1 Current Limit",
-        PwrBatOut2CurrentLimitMa = 0x21 => "Bat Out2 Current Limit",
+        BatOut1CurrentLimitMa    = 0x20 => "Bat Out1 Current Limit",
+        BatOut2CurrentLimitMa    = 0x21 => "Bat Out2 Current Limit",
         Pwr5VOutCurrentLimitMa   = 0x22 => "5V Out Current Limit",
         PwrServoCurrentLimitMa   = 0x23 => "Servo power out Current Limit",
         ChargeMinCurrentMa       = 0x24 => "Charge Min Current",
@@ -33,15 +27,15 @@ enum_with_from_u8! {
         ChargeTempDerating       = 0x32 => "Charge Temp Derating",
         ChargeTempLimit          = 0x33 => "Charge Temp Limit",
 
-        // Set baud rate for serial port communication with servos, disable when set to 0
+        // 舵机串口波特率，设为0禁用
         ServoBaudRate            = 0x40 => "Servo Baud Rate",
         ChargeStopSoc            = 0x41 => "Charge Stop Soc",
         ChargeStopVoltageMv      = 0x42 => "Charge Stop Voltage",
         // servo robot board发送的日志等级
         TxLogLevel               = 0x43 => "TxLog Level",
-        // Nan, BQ40Z50, BQ28Z610
+        // 未配置=NaN, BQ40Z50, BQ28Z610
         BMSIc                    = 0x44 => "BMS IC",
-        // Nan, MPU6500, MPU6050
+        // 未配置=NaN, MPU6500, MPU6050
         IMUIc                    = 0x45 => "IMU IC",
     }
 }
@@ -49,8 +43,8 @@ enum_with_from_u8! {
 impl ConfigType {
     pub fn unit(&self) -> &'static str {
         match self {
-            Self::PwrBatOut1CurrentLimitMa
-            | Self::PwrBatOut2CurrentLimitMa
+            Self::BatOut1CurrentLimitMa
+            | Self::BatOut2CurrentLimitMa
             | Self::Pwr5VOutCurrentLimitMa
             | Self::PwrServoCurrentLimitMa
             | Self::ChargeMinCurrentMa
@@ -69,19 +63,19 @@ impl ConfigType {
     /// 保留 `Option` 以便未来加入无值命令(Reset/Shutdown 类)。
     pub fn value_size(&self) -> Option<usize> {
         match self {
-            // Switches: 1 byte (bool)
+            // 开关: 1字节 (bool)
             Self::EnableBatOut1
-            | Self::EnableBatOut2
+            | Self::EnablePwrBatOut2
             | Self::EnablePwr5V
             | Self::EnableCharge
-            // When the external servo power supply is enabled,
-            // the ADC collects data from the corresponding channel to obtain the servo power supply voltage and power.
-            | Self::EnableExtServoPower => Some(1),
-            // u8 values: 1 byte
+            // 当舵机电源监控启用时，
+            // ADC 采集对应通道获取舵机电源电压和功率。
+            | Self::EnableServoPwrMonitor => Some(1),
+            // u8 值: 1字节
             Self::ChargeStopSoc | Self::TxLogLevel | Self::BMSIc | Self::IMUIc => Some(1),
-            // u16 values: 2 bytes
-            Self::PwrBatOut1CurrentLimitMa
-            | Self::PwrBatOut2CurrentLimitMa
+            // u16 值: 2字节
+            Self::BatOut1CurrentLimitMa
+            | Self::BatOut2CurrentLimitMa
             | Self::Pwr5VOutCurrentLimitMa
             | Self::PwrServoCurrentLimitMa
             | Self::ChargeMinCurrentMa
@@ -91,7 +85,7 @@ impl ConfigType {
             | Self::ChargeTempDerating
             | Self::ChargeTempLimit
             | Self::ChargeStopVoltageMv => Some(2),
-            // u32 values: 4 bytes
+            // u32 值: 4字节
             Self::ServoBaudRate => Some(4),
         }
     }
@@ -100,45 +94,49 @@ impl ConfigType {
 /// Configuration values
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Config {
-    // Switch the servo power supply
+    // 电池对外输出1开关
     EnableBatOut1(bool),
-    // Switch 5v power supply
-    EnablePwr5V(bool),
-    // Switch on and off to charge the battery
-    EnableCharge(bool),
-    // Switching on battery extra output
+    // 电池对外输出2开关
     EnableBatOut2(bool),
-    // Charging capacity limit, such as charging only up to 80%
-    ChargeStopSoc(u8),
-    // The log level of to send
-    TxLogLevel(LogLevel),
-    // Servo power supply current limiting
-    PowerServoCurrentLimitMa(u16),
-    // Servo power supply temperature restriction
-    PowerServoTempLimit(u16),
-    // 5V power temperature limit
-    Power5vTempLimit(u16),
-    // Maximum charging current
-    ChargeMaxCurrentMa(u16),
-    // The temperature of the charging circuit when charging starts to drop current
-    ChargeTempDerating(u16),
-    // The temperature of the charging circuit when charging is stopped
-    ChargeTempLimit(u16),
-    // Charging stop-voltage range
-    ChargeStopVoltageMv(u16),
-    // Set baud rate for serial port communication with servos
-    ServoBaudRate(u32),
-    // Battery extra output current limiting
-    PowerBatOut2CurrentLimitMa(u16),
+    // 5V 电源开关
+    EnablePwr5V(bool),
+    // 充电开关
+    EnableCharge(bool),
+    EnableServoPwrMonitor(bool),
+
+    // 电池输出1电流限制
+    BatOut1CurrentLimitMa(u16),
+    // 电池输出2电流限制
+    BatOut2CurrentLimitMa(u16),
     // 5V output current limiting
-    Power5VOutCurrentLimitMa(u16),
-    // Servo power output current limiting
-    PowerServoOutCurrentLimitMa(u16),
-    // Minimum charging current
+    Pwr5VOutCurrentLimitMa(u16),
+    // 舵机电源电流限制
+    PwrServoCurrentLimitMa(u16),
+    // 最小充电电流
     ChargeMinCurrentMa(u16),
+    // 最大充电电流
+    ChargeMaxCurrentMa(u16),
+
+    // 舵机电源温度限制
+    PwrServoTempLimit(u16),
+    // 5V power temperature limit
+    Pwr5vTempLimit(u16),
+    // 充电电路降额温度
+    ChargeTempDerating(u16),
+    // 充电电路停止温度
+    ChargeTempLimit(u16),
+
+    // 舵机串口波特率
+    ServoBaudRate(u32),
+    // 充电容量上限百分比
+    ChargeStopSoc(u8),
+    // 充电截止电压
+    ChargeStopVoltageMv(u16),
+    // 发送日志等级
+    TxLogLevel(LogLevel),
     // BMS IC type (0=NaN, 1=BQ40Z50, 2=BQ28Z10)
     BMSIc(u8),
-    // IMU IC type (0=NaN, 1=MPU6500, 2=MPU6050)
+    // IMU IC 类型 (0=未配置, 1=MPU6500, 2=MPU6050)
     IMUIc(u8),
 }
 
@@ -146,23 +144,27 @@ impl Config {
     pub fn config_type(&self) -> ConfigType {
         match self {
             Self::EnableBatOut1(_) => ConfigType::EnableBatOut1,
+            Self::EnableBatOut2(_) => ConfigType::EnablePwrBatOut2,
             Self::EnablePwr5V(_) => ConfigType::EnablePwr5V,
             Self::EnableCharge(_) => ConfigType::EnableCharge,
-            Self::EnableBatOut2(_) => ConfigType::EnableBatOut2,
-            Self::ChargeStopSoc(_) => ConfigType::ChargeStopSoc,
-            Self::TxLogLevel(_) => ConfigType::TxLogLevel,
-            Self::PowerServoCurrentLimitMa(_) => ConfigType::PwrBatOut1CurrentLimitMa,
-            Self::PowerServoTempLimit(_) => ConfigType::PwrServoTempLimit,
-            Self::Power5vTempLimit(_) => ConfigType::Pwr5vTempLimit,
+            Self::EnableServoPwrMonitor(_) => ConfigType::EnableServoPwrMonitor,
+
+            Self::BatOut1CurrentLimitMa(_) => ConfigType::BatOut1CurrentLimitMa,
+            Self::BatOut2CurrentLimitMa(_) => ConfigType::BatOut2CurrentLimitMa,
+            Self::PwrServoCurrentLimitMa(_) => ConfigType::PwrServoCurrentLimitMa,
+            Self::Pwr5VOutCurrentLimitMa(_) => ConfigType::Pwr5VOutCurrentLimitMa,
+            Self::ChargeMinCurrentMa(_) => ConfigType::ChargeMinCurrentMa,
             Self::ChargeMaxCurrentMa(_) => ConfigType::ChargeMaxCurrentMa,
+
+            Self::PwrServoTempLimit(_) => ConfigType::PwrServoTempLimit,
+            Self::Pwr5vTempLimit(_) => ConfigType::Pwr5vTempLimit,
             Self::ChargeTempDerating(_) => ConfigType::ChargeTempDerating,
             Self::ChargeTempLimit(_) => ConfigType::ChargeTempLimit,
-            Self::ChargeStopVoltageMv(_) => ConfigType::ChargeStopVoltageMv,
+
             Self::ServoBaudRate(_) => ConfigType::ServoBaudRate,
-            Self::PowerBatOut2CurrentLimitMa(_) => ConfigType::PwrBatOut2CurrentLimitMa,
-            Self::Power5VOutCurrentLimitMa(_) => ConfigType::Pwr5VOutCurrentLimitMa,
-            Self::PowerServoOutCurrentLimitMa(_) => ConfigType::PwrServoCurrentLimitMa,
-            Self::ChargeMinCurrentMa(_) => ConfigType::ChargeMinCurrentMa,
+            Self::ChargeStopSoc(_) => ConfigType::ChargeStopSoc,
+            Self::ChargeStopVoltageMv(_) => ConfigType::ChargeStopVoltageMv,
+            Self::TxLogLevel(_) => ConfigType::TxLogLevel,
             Self::BMSIc(_) => ConfigType::BMSIc,
             Self::IMUIc(_) => ConfigType::IMUIc,
         }
@@ -173,27 +175,28 @@ impl Config {
             Self::EnableBatOut1(on)
             | Self::EnablePwr5V(on)
             | Self::EnableCharge(on)
-            | Self::EnableBatOut2(on) => {
+            | Self::EnableBatOut2(on)
+            | Self::EnableServoPwrMonitor(on) => {
                 if *on {
                     1.0
                 } else {
                     0.0
                 }
             }
-            Self::ChargeStopSoc(v) => *v as f32,
-            Self::TxLogLevel(level) => *level as u8 as f32,
-            Self::PowerServoCurrentLimitMa(v)
+            Self::PwrServoCurrentLimitMa(v)
             | Self::ChargeStopVoltageMv(v)
             | Self::ChargeMaxCurrentMa(v)
-            | Self::PowerServoTempLimit(v)
-            | Self::Power5vTempLimit(v)
+            | Self::PwrServoTempLimit(v)
+            | Self::Pwr5vTempLimit(v)
             | Self::ChargeTempDerating(v)
             | Self::ChargeTempLimit(v) => *v as f32,
             Self::ServoBaudRate(v) => *v as f32,
-            Self::PowerBatOut2CurrentLimitMa(v)
-            | Self::Power5VOutCurrentLimitMa(v)
-            | Self::PowerServoOutCurrentLimitMa(v)
+            Self::BatOut2CurrentLimitMa(v)
+            | Self::Pwr5VOutCurrentLimitMa(v)
+            | Self::BatOut1CurrentLimitMa(v)
             | Self::ChargeMinCurrentMa(v) => *v as f32,
+            Self::ChargeStopSoc(v) => *v as f32,
+            Self::TxLogLevel(level) => *level as u8 as f32,
             Self::BMSIc(v) | Self::IMUIc(v) => *v as f32,
         }
     }
@@ -203,22 +206,25 @@ impl Config {
             ConfigType::EnableBatOut1 => Self::EnableBatOut1(value != 0.0),
             ConfigType::EnablePwr5V => Self::EnablePwr5V(value != 0.0),
             ConfigType::EnableCharge => Self::EnableCharge(value != 0.0),
-            ConfigType::EnableBatOut2 => Self::EnableBatOut2(value != 0.0),
-            ConfigType::EnableExtServoPower => Self::EnablePwr5V(value != 0.0),
-            ConfigType::ChargeStopSoc => Self::ChargeStopSoc(value as _),
-            ConfigType::TxLogLevel => Self::TxLogLevel(LogLevel::from_u8(value as _)),
-            ConfigType::PwrBatOut1CurrentLimitMa => Self::PowerServoCurrentLimitMa(value as _),
-            ConfigType::PwrServoTempLimit => Self::PowerServoTempLimit(value as _),
-            ConfigType::Pwr5vTempLimit => Self::Power5vTempLimit(value as _),
+            ConfigType::EnablePwrBatOut2 => Self::EnableBatOut2(value != 0.0),
+            ConfigType::EnableServoPwrMonitor => Self::EnableServoPwrMonitor(value != 0.0),
+
+            ConfigType::BatOut1CurrentLimitMa => Self::BatOut1CurrentLimitMa(value as _),
+            ConfigType::BatOut2CurrentLimitMa => Self::BatOut2CurrentLimitMa(value as _),
+            ConfigType::Pwr5VOutCurrentLimitMa => Self::Pwr5VOutCurrentLimitMa(value as _),
+            ConfigType::PwrServoCurrentLimitMa => Self::PwrServoCurrentLimitMa(value as _),
+            ConfigType::ChargeMinCurrentMa => Self::ChargeMinCurrentMa(value as _),
             ConfigType::ChargeMaxCurrentMa => Self::ChargeMaxCurrentMa(value as _),
+
+            ConfigType::PwrServoTempLimit => Self::PwrServoTempLimit(value as _),
+            ConfigType::Pwr5vTempLimit => Self::Pwr5vTempLimit(value as _),
             ConfigType::ChargeTempDerating => Self::ChargeTempDerating(value as _),
             ConfigType::ChargeTempLimit => Self::ChargeTempLimit(value as _),
-            ConfigType::ChargeStopVoltageMv => Self::ChargeStopVoltageMv(value as _),
+
             ConfigType::ServoBaudRate => Self::ServoBaudRate(value as _),
-            ConfigType::PwrBatOut2CurrentLimitMa => Self::PowerBatOut2CurrentLimitMa(value as _),
-            ConfigType::Pwr5VOutCurrentLimitMa => Self::Power5VOutCurrentLimitMa(value as _),
-            ConfigType::PwrServoCurrentLimitMa => Self::PowerServoOutCurrentLimitMa(value as _),
-            ConfigType::ChargeMinCurrentMa => Self::ChargeMinCurrentMa(value as _),
+            ConfigType::ChargeStopSoc => Self::ChargeStopSoc(value as _),
+            ConfigType::ChargeStopVoltageMv => Self::ChargeStopVoltageMv(value as _),
+            ConfigType::TxLogLevel => Self::TxLogLevel(LogLevel::from_u8(value as _)),
             ConfigType::BMSIc => Self::BMSIc(value as _),
             ConfigType::IMUIc => Self::IMUIc(value as _),
         }
@@ -234,25 +240,19 @@ impl Config {
         let config_type =
             ConfigType::from_u8(data[0]).ok_or(FrameError::PayloadDecode("Unknown config type"))?;
 
-        // No special handling needed — all remaining ConfigType variants have value payloads
+        // 所有 ConfigType 变体均有值载荷，无需特殊处理
 
-        // Determine required payload size based on config type
+        // 根据配置类型确定所需载荷大小
         let value_len = match config_type {
-            // Switches: 1 byte (bool)
+            // 开关: 1字节 (bool)
             ConfigType::EnableBatOut1
             | ConfigType::EnablePwr5V
             | ConfigType::EnableCharge
-            | ConfigType::EnableBatOut2
-            | ConfigType::EnableExtServoPower => 1,
-            // ChargeStopSoc: 1 byte (u8)
-            ConfigType::ChargeStopSoc => 1,
-            // TxLogLevel: 1 byte (u8)
-            ConfigType::TxLogLevel => 1,
-            // u8 configs: 1 byte
-            ConfigType::BMSIc | ConfigType::IMUIc => 1,
-            // u16 configs: 2 bytes
-            ConfigType::PwrBatOut1CurrentLimitMa
-            | ConfigType::PwrBatOut2CurrentLimitMa
+            | ConfigType::EnablePwrBatOut2
+            | ConfigType::EnableServoPwrMonitor => 1,
+            // u16 配置: 2字节
+            ConfigType::BatOut1CurrentLimitMa
+            | ConfigType::BatOut2CurrentLimitMa
             | ConfigType::Pwr5VOutCurrentLimitMa
             | ConfigType::PwrServoCurrentLimitMa
             | ConfigType::ChargeMinCurrentMa
@@ -262,7 +262,13 @@ impl Config {
             | ConfigType::ChargeTempDerating
             | ConfigType::ChargeTempLimit
             | ConfigType::ChargeStopVoltageMv => 2,
-            // u32 config: 4 bytes
+            // ChargeStopSoc: 1字节 (u8)
+            ConfigType::ChargeStopSoc => 1,
+            // TxLogLevel: 1字节 (u8)
+            ConfigType::TxLogLevel => 1,
+            // u8 配置: 1字节
+            ConfigType::BMSIc | ConfigType::IMUIc => 1,
+            // u32 配置: 4字节
             ConfigType::ServoBaudRate => 4,
         };
 
@@ -291,24 +297,65 @@ impl Config {
             Self::EnableBatOut1(on)
             | Self::EnablePwr5V(on)
             | Self::EnableCharge(on)
-            | Self::EnableBatOut2(on) => buf.push(*on as u8),
+            | Self::EnableBatOut2(on)
+            | Self::EnableServoPwrMonitor(on) => buf.push(*on as u8),
             Self::ChargeStopSoc(v) => buf.push(*v),
             Self::TxLogLevel(level) => buf.push(*level as u8),
-            Self::PowerServoCurrentLimitMa(v)
-            | Self::PowerServoTempLimit(v)
-            | Self::Power5vTempLimit(v)
+            Self::PwrServoCurrentLimitMa(v)
+            | Self::PwrServoTempLimit(v)
+            | Self::Pwr5vTempLimit(v)
             | Self::ChargeMaxCurrentMa(v)
             | Self::ChargeTempDerating(v)
             | Self::ChargeTempLimit(v)
             | Self::ChargeStopVoltageMv(v) => buf.extend_from_slice(&v.to_le_bytes()),
             Self::ServoBaudRate(v) => buf.extend_from_slice(&v.to_le_bytes()),
-            Self::PowerBatOut2CurrentLimitMa(v)
-            | Self::Power5VOutCurrentLimitMa(v)
-            | Self::PowerServoOutCurrentLimitMa(v)
+            Self::BatOut2CurrentLimitMa(v)
+            | Self::Pwr5VOutCurrentLimitMa(v)
+            | Self::BatOut1CurrentLimitMa(v)
             | Self::ChargeMinCurrentMa(v) => buf.extend_from_slice(&v.to_le_bytes()),
             Self::BMSIc(v) | Self::IMUIc(v) => buf.push(*v),
         }
         buf
+    }
+}
+
+/// 获取配置值
+pub fn get_config_value(c: &BoardConfigSnapshot, ct: ConfigType) -> Config {
+    match ct {
+        ConfigType::EnableBatOut1 => Config::EnableBatOut1(c.enable_bat_ou1),
+        ConfigType::EnablePwrBatOut2 => Config::EnableBatOut2(c.enable_bat_out2),
+        ConfigType::EnablePwr5V => Config::EnablePwr5V(c.enable_pwr_5v),
+        ConfigType::EnableCharge => Config::EnableCharge(c.enable_charge),
+        ConfigType::EnableServoPwrMonitor => {
+            Config::EnableServoPwrMonitor(c.enable_servo_pwr_monitor)
+        }
+
+        ConfigType::BatOut1CurrentLimitMa => {
+            Config::BatOut1CurrentLimitMa(c.bat_out1_current_limit_ma)
+        }
+        ConfigType::BatOut2CurrentLimitMa => {
+            Config::BatOut2CurrentLimitMa(c.bat_out2_current_limit_ma)
+        }
+        ConfigType::Pwr5VOutCurrentLimitMa => {
+            Config::Pwr5VOutCurrentLimitMa(c.pwr_5v_out_current_limit_ma)
+        }
+        ConfigType::PwrServoCurrentLimitMa => {
+            Config::PwrServoCurrentLimitMa(c.servo_current_limit_ma)
+        }
+        ConfigType::ChargeMinCurrentMa => Config::ChargeMinCurrentMa(c.charge_min_current_ma),
+        ConfigType::ChargeMaxCurrentMa => Config::ChargeMaxCurrentMa(c.charge_max_current_ma),
+
+        ConfigType::PwrServoTempLimit => Config::PwrServoTempLimit(c.pwr_servo_temp_limit),
+        ConfigType::Pwr5vTempLimit => Config::Pwr5vTempLimit(c.pwr_5v_temp_limit),
+        ConfigType::ChargeTempDerating => Config::ChargeTempDerating(c.charge_temp_derating),
+        ConfigType::ChargeTempLimit => Config::ChargeTempLimit(c.charge_temp_limit),
+
+        ConfigType::ServoBaudRate => Config::ServoBaudRate(c.servo_baud_rate),
+        ConfigType::ChargeStopSoc => Config::ChargeStopSoc(c.charge_stop_soc),
+        ConfigType::ChargeStopVoltageMv => Config::ChargeStopVoltageMv(c.charge_stop_voltage_mv),
+        ConfigType::TxLogLevel => Config::TxLogLevel(c.tx_log_level),
+        ConfigType::BMSIc => Config::BMSIc(c.bms_ic),
+        ConfigType::IMUIc => Config::IMUIc(c.imu_ic),
     }
 }
 
@@ -337,19 +384,19 @@ pub struct BoardConfigSnapshot {
     pub enable_bat_out2: bool,
     pub enable_pwr_5v: bool,
     pub enable_charge: bool,
-    pub enable_ext_servo_power: bool,
+    pub enable_servo_pwr_monitor: bool,
     // === Current limits (0x20~0x25) ===
     /// Servo power supply current limit (mA)
-    pub servo_current_limit_ma: u16,
+    pub bat_out1_current_limit_ma: u16,
     /// Battery extra output current limit (mA)
     pub bat_out2_current_limit_ma: u16,
     /// 5V output current limit (mA)
     pub pwr_5v_out_current_limit_ma: u16,
     /// Servo power output current limit (mA)
-    pub servo_out_current_limit_ma: u16,
-    /// Minimum charging current (mA)
+    pub servo_current_limit_ma: u16,
+    /// 最小充电电流 (mA)
     pub charge_min_current_ma: u16,
-    /// Maximum charging current (mA)
+    /// 最大充电电流 (mA)
     pub charge_max_current_ma: u16,
     // === Temp limits (0x30~0x33) ===
     /// Servo power supply temperature limit (×10)
@@ -364,41 +411,41 @@ pub struct BoardConfigSnapshot {
     /// STM32 servo communication baud rate
     pub servo_baud_rate: u32,
     /// Charging capacity limit (1~100)
-    pub charge_stop_percentage: u8,
+    pub charge_stop_soc: u8,
     /// Charging stop voltage (mV)
     pub charge_stop_voltage_mv: u16,
     /// Board log level
     pub tx_log_level: LogLevel,
     /// BMS IC type (0=NaN, 1=BQ40Z50, 2=BQ28Z10)
     pub bms_ic: u8,
-    /// IMU IC type (0=NaN, 1=MPU6500, 2=MPU6050)
+    /// IMU IC 类型 (0=未配置, 1=MPU6500, 2=MPU6050)
     pub imu_ic: u8,
 }
 
 impl Default for BoardConfigSnapshot {
     fn default() -> Self {
         BoardConfigSnapshot {
-            // Switches
+            // 开关
             enable_bat_ou1: true,
             enable_bat_out2: true,
             enable_pwr_5v: true,
             enable_charge: true,
-            enable_ext_servo_power: true,
-            // Current limits
-            servo_current_limit_ma: 50,
+            enable_servo_pwr_monitor: true,
+            // 电流限制
+            bat_out1_current_limit_ma: 50,
             bat_out2_current_limit_ma: 0,
             pwr_5v_out_current_limit_ma: 0,
-            servo_out_current_limit_ma: 0,
+            servo_current_limit_ma: 0,
             charge_min_current_ma: 0,
             charge_max_current_ma: 90,
-            // Temp limits
+            // 温度限制
             pwr_servo_temp_limit: 800,
             pwr_5v_temp_limit: 700,
             charge_temp_derating: 600,
             charge_temp_limit: 700,
-            // Misc
+            // 杂项
             servo_baud_rate: 115200,
-            charge_stop_percentage: 100,
+            charge_stop_soc: 100,
             charge_stop_voltage_mv: 168,
             tx_log_level: LogLevel::Info,
             bms_ic: 0,
@@ -408,8 +455,8 @@ impl Default for BoardConfigSnapshot {
 }
 
 impl BoardConfigSnapshot {
-    /// Payload size: 4 bool + 4 u8 + 11 u16 + 1 u32 = 34 bytes
-    const PAYLOAD_SIZE: usize = 34;
+    /// Payload size: 5 bool + 4 u8 + 11 u16 + 1 u32 = 35 bytes
+    const PAYLOAD_SIZE: usize = 35;
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, FrameError> {
         if data.len() < Self::PAYLOAD_SIZE {
@@ -429,17 +476,17 @@ impl BoardConfigSnapshot {
         o += 1;
         let enable_charge = data[o] != 0;
         o += 1;
-        let enable_ext_servo_power = data[o] != 0;
+        let enable_servo_pwr_monitor = data[o] != 0;
         o += 1;
 
         // === Current limits (0x20~0x25) — 6×u16 = 12 bytes ===
-        let servo_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
+        let bat_out1_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
         let bat_out2_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
         let pwr_5v_out_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
-        let servo_out_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
+        let servo_current_limit_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
         let charge_min_current_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
@@ -475,11 +522,11 @@ impl BoardConfigSnapshot {
             enable_bat_out2,
             enable_pwr_5v,
             enable_charge,
-            enable_ext_servo_power,
-            servo_current_limit_ma,
+            enable_servo_pwr_monitor,
+            bat_out1_current_limit_ma,
             bat_out2_current_limit_ma,
             pwr_5v_out_current_limit_ma,
-            servo_out_current_limit_ma,
+            servo_current_limit_ma,
             charge_min_current_ma,
             charge_max_current_ma,
             pwr_servo_temp_limit,
@@ -487,7 +534,7 @@ impl BoardConfigSnapshot {
             charge_temp_derating,
             charge_temp_limit,
             servo_baud_rate,
-            charge_stop_percentage,
+            charge_stop_soc: charge_stop_percentage,
             charge_stop_voltage_mv,
             tx_log_level,
             bms_ic,
@@ -503,13 +550,13 @@ impl BoardConfigSnapshot {
         buf.push(self.enable_bat_out2 as u8);
         buf.push(self.enable_pwr_5v as u8);
         buf.push(self.enable_charge as u8);
-        buf.push(self.enable_ext_servo_power as u8);
+        buf.push(self.enable_servo_pwr_monitor as u8);
 
         // === Current limits (0x20~0x25) ===
-        buf.extend_from_slice(&self.servo_current_limit_ma.to_le_bytes());
+        buf.extend_from_slice(&self.bat_out1_current_limit_ma.to_le_bytes());
         buf.extend_from_slice(&self.bat_out2_current_limit_ma.to_le_bytes());
         buf.extend_from_slice(&self.pwr_5v_out_current_limit_ma.to_le_bytes());
-        buf.extend_from_slice(&self.servo_out_current_limit_ma.to_le_bytes());
+        buf.extend_from_slice(&self.servo_current_limit_ma.to_le_bytes());
         buf.extend_from_slice(&self.charge_min_current_ma.to_le_bytes());
         buf.extend_from_slice(&self.charge_max_current_ma.to_le_bytes());
 
@@ -521,7 +568,7 @@ impl BoardConfigSnapshot {
 
         // === Misc (0x40~0x45) ===
         buf.extend_from_slice(&self.servo_baud_rate.to_le_bytes());
-        buf.push(self.charge_stop_percentage);
+        buf.push(self.charge_stop_soc);
         buf.extend_from_slice(&self.charge_stop_voltage_mv.to_le_bytes());
         buf.push(self.tx_log_level as u8);
         buf.push(self.bms_ic);
@@ -546,20 +593,25 @@ impl core::fmt::Display for BoardConfigSnapshot {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "sw=[{},{},{},{},{}] \
+            "sw=[{},{},{},{},{}, {}] \
              cur=[{},{},{},{},{},{:.1}A] \
              temp=[{:.1},{:.1},{:.1},{:.1}]°C \
              lvl={} bms={} imu={} \
              chg={:.1}mV/{}% baud={}",
-            if self.enable_bat_ou1 { "S" } else { "-" },
-            if self.enable_bat_out2 { "B" } else { "-" },
-            if self.enable_pwr_5v { "5" } else { "-" },
-            if self.enable_charge { "C" } else { "-" },
-            self.charge_stop_percentage,
-            self.servo_current_limit_ma,
+            if self.enable_bat_ou1 { "O1" } else { "-" },
+            if self.enable_bat_out2 { "O2" } else { "-" },
+            if self.enable_pwr_5v { "5V" } else { "-" },
+            if self.enable_charge { "CG" } else { "-" },
+            if self.enable_servo_pwr_monitor {
+                "SM"
+            } else {
+                "-"
+            },
+            self.charge_stop_soc,
+            self.bat_out1_current_limit_ma,
             self.bat_out2_current_limit_ma,
             self.pwr_5v_out_current_limit_ma,
-            self.servo_out_current_limit_ma,
+            self.servo_current_limit_ma,
             self.charge_min_current_ma,
             self.charge_max_current_ma as f32,
             self.pwr_servo_temp_limit as f32 / 10.0,
@@ -570,7 +622,7 @@ impl core::fmt::Display for BoardConfigSnapshot {
             self.bms_ic,
             self.imu_ic,
             self.charge_stop_voltage_mv,
-            self.charge_stop_percentage,
+            self.charge_stop_soc,
             self.servo_baud_rate,
         )
     }
@@ -582,40 +634,39 @@ mod tests {
 
     #[test]
     fn test_config_type_value_size() {
-        // Test that value_size() returns correct sizes
+        // 测试 value_size() 返回正确大小
         assert_eq!(ConfigType::EnableBatOut1.value_size(), Some(1));
         assert_eq!(ConfigType::ChargeStopSoc.value_size(), Some(1));
-        assert_eq!(ConfigType::PwrBatOut1CurrentLimitMa.value_size(), Some(2));
+        assert_eq!(ConfigType::BatOut1CurrentLimitMa.value_size(), Some(2));
         assert_eq!(ConfigType::ServoBaudRate.value_size(), Some(4));
     }
 
     #[test]
     fn test_config_encode_decode_roundtrip() {
-        // Test Config enum encoding/decoding — covers all variants
+        // 测试 Config 枚举编解码 — 覆盖所有变体
         let configs = vec![
-            // Switches (bool)
+            // 开关 (bool)
             Config::EnableBatOut1(true),
-            Config::EnableBatOut1(false),
+            Config::EnableBatOut2(true),
             Config::EnablePwr5V(true),
             Config::EnableCharge(false),
-            Config::EnableBatOut2(true),
-            // u8 values
+            // u8 值
             Config::ChargeStopSoc(80),
             Config::BMSIc(1),
             Config::IMUIc(2),
-            // u16 values
-            Config::PowerServoCurrentLimitMa(50),
-            Config::PowerBatOut2CurrentLimitMa(200),
-            Config::Power5VOutCurrentLimitMa(500),
-            Config::PowerServoOutCurrentLimitMa(100),
+            // u16 值
+            Config::PwrServoCurrentLimitMa(50),
+            Config::BatOut2CurrentLimitMa(200),
+            Config::Pwr5VOutCurrentLimitMa(500),
+            Config::BatOut1CurrentLimitMa(100),
             Config::ChargeMinCurrentMa(10),
             Config::ChargeMaxCurrentMa(90),
-            Config::PowerServoTempLimit(800),
-            Config::Power5vTempLimit(700),
+            Config::PwrServoTempLimit(800),
+            Config::Pwr5vTempLimit(700),
             Config::ChargeTempDerating(600),
             Config::ChargeTempLimit(700),
             Config::ChargeStopVoltageMv(168),
-            // u32 value
+            // u32 值
             Config::ServoBaudRate(115200),
         ];
 
@@ -633,15 +684,15 @@ mod tests {
         assert_eq!(bytes.len(), BoardConfigSnapshot::PAYLOAD_SIZE);
 
         let decoded = BoardConfigSnapshot::from_bytes(&bytes).unwrap();
-        // Switches
+        // 开关
         assert_eq!(config.enable_bat_ou1, decoded.enable_bat_ou1);
         assert_eq!(config.enable_bat_out2, decoded.enable_bat_out2);
         assert_eq!(config.enable_pwr_5v, decoded.enable_pwr_5v);
         assert_eq!(config.enable_charge, decoded.enable_charge);
-        // Current limits
+        // 电流限制
         assert_eq!(
-            config.servo_current_limit_ma,
-            decoded.servo_current_limit_ma
+            config.bat_out1_current_limit_ma,
+            decoded.bat_out1_current_limit_ma
         );
         assert_eq!(
             config.bat_out2_current_limit_ma,
@@ -652,21 +703,21 @@ mod tests {
             decoded.pwr_5v_out_current_limit_ma
         );
         assert_eq!(
-            config.servo_out_current_limit_ma,
-            decoded.servo_out_current_limit_ma
+            config.servo_current_limit_ma,
+            decoded.servo_current_limit_ma
         );
         assert_eq!(config.charge_min_current_ma, decoded.charge_min_current_ma);
         assert_eq!(config.charge_max_current_ma, decoded.charge_max_current_ma);
-        // Temp limits
+        // 温度限制
         assert_eq!(config.pwr_servo_temp_limit, decoded.pwr_servo_temp_limit);
         assert_eq!(config.pwr_5v_temp_limit, decoded.pwr_5v_temp_limit);
         assert_eq!(config.charge_temp_derating, decoded.charge_temp_derating);
         assert_eq!(config.charge_temp_limit, decoded.charge_temp_limit);
-        // Misc
+        // 杂项
         assert_eq!(config.servo_baud_rate, decoded.servo_baud_rate);
         assert_eq!(
-            config.charge_stop_percentage,
-            decoded.charge_stop_percentage
+            config.charge_stop_soc,
+            decoded.charge_stop_soc
         );
         assert_eq!(
             config.charge_stop_voltage_mv,
@@ -683,11 +734,11 @@ mod tests {
             enable_bat_out2: false,
             enable_pwr_5v: false,
             enable_charge: true,
-            enable_ext_servo_power: true,
-            servo_current_limit_ma: 100,
+            enable_servo_pwr_monitor: true,
+            bat_out1_current_limit_ma: 100,
             bat_out2_current_limit_ma: 300,
             pwr_5v_out_current_limit_ma: 500,
-            servo_out_current_limit_ma: 150,
+            servo_current_limit_ma: 150,
             charge_min_current_ma: 10,
             charge_max_current_ma: 200,
             pwr_servo_temp_limit: 850,
@@ -695,7 +746,7 @@ mod tests {
             charge_temp_derating: 650,
             charge_temp_limit: 750,
             servo_baud_rate: 921600,
-            charge_stop_percentage: 80,
+            charge_stop_soc: 80,
             charge_stop_voltage_mv: 168,
             tx_log_level: LogLevel::Debug,
             bms_ic: 1,
@@ -710,11 +761,11 @@ mod tests {
         assert_eq!(decoded.enable_bat_out2, false);
         assert_eq!(decoded.enable_pwr_5v, false);
         assert_eq!(decoded.enable_charge, true);
-        assert_eq!(decoded.enable_ext_servo_power, true);
-        assert_eq!(decoded.servo_current_limit_ma, 100);
+        assert_eq!(decoded.enable_servo_pwr_monitor, true);
+        assert_eq!(decoded.bat_out1_current_limit_ma, 100);
         assert_eq!(decoded.bat_out2_current_limit_ma, 300);
         assert_eq!(decoded.pwr_5v_out_current_limit_ma, 500);
-        assert_eq!(decoded.servo_out_current_limit_ma, 150);
+        assert_eq!(decoded.servo_current_limit_ma, 150);
         assert_eq!(decoded.charge_min_current_ma, 10);
         assert_eq!(decoded.charge_max_current_ma, 200);
         assert_eq!(decoded.pwr_servo_temp_limit, 850);
@@ -722,7 +773,7 @@ mod tests {
         assert_eq!(decoded.charge_temp_derating, 650);
         assert_eq!(decoded.charge_temp_limit, 750);
         assert_eq!(decoded.charge_stop_voltage_mv, 168);
-        assert_eq!(decoded.charge_stop_percentage, 80);
+        assert_eq!(decoded.charge_stop_soc, 80);
         assert_eq!(decoded.servo_baud_rate, 921600);
         assert_eq!(decoded.bms_ic, 1);
         assert_eq!(decoded.imu_ic, 2);

@@ -122,6 +122,7 @@ pub struct SrPower {
     pub bat_out1_current_ma: u16,
     pub bat_out2_current_ma: u16,
     pub pwr_5v_current_ma: u16,
+    pub pwr_5v_voltage_mv: u16,
 }
 
 #[repr(C)]
@@ -291,10 +292,10 @@ fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
         enable_bat_out2: c.enable_bat_out2 as u8,
         enable_pwr_5v: c.enable_pwr_5v as u8,
         enable_charge: c.enable_charge as u8,
-        servo_current_limit_ma: c.servo_current_limit_ma,
+        servo_current_limit_ma: c.bat_out1_current_limit_ma,
         bat_out2_current_limit_ma: c.bat_out2_current_limit_ma,
         pwr_5v_out_current_limit_ma: c.pwr_5v_out_current_limit_ma,
-        servo_out_current_limit_ma: c.servo_out_current_limit_ma,
+        servo_out_current_limit_ma: c.servo_current_limit_ma,
         charge_min_current_ma: c.charge_min_current_ma,
         charge_max_current_ma: c.charge_max_current_ma,
         power_servo_temp_limit: c.pwr_servo_temp_limit,
@@ -302,7 +303,7 @@ fn to_sr_board_config(c: BoardConfigSnapshot) -> SrBoardConfig {
         charge_temp_derating: c.charge_temp_derating,
         charge_temp_limit: c.charge_temp_limit,
         servo_baud_rate: c.servo_baud_rate,
-        charge_stop_percentage: c.charge_stop_percentage,
+        charge_stop_percentage: c.charge_stop_soc,
         charge_stop_voltage_mv: c.charge_stop_voltage_mv,
         tx_log_level: c.tx_log_level as u8,
         bms_ic: c.bms_ic,

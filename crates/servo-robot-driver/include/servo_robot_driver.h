@@ -229,6 +229,8 @@ typedef struct {
     uint16_t bat_out2_current_ma;
     /// 5V输出电流
     uint16_t pwr_5v_current_ma;
+    /// 5V输出电压
+    uint16_t pwr_5v_voltage_mv;
 } sr_power;
 
 /// 电池状态

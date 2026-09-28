@@ -80,7 +80,7 @@ impl Diagnostic {
         let pd_request_current_ma = u16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
 
-        // Temperature data (i16, 实际值 = 原始值 / 10)
+        // 温度数据 (i16, 实际值 = 原始值 / 10)
         let temp_servo_power = i16::from_le_bytes([data[o], data[o + 1]]);
         o += 2;
         let temp_5v_power = i16::from_le_bytes([data[o], data[o + 1]]);
@@ -125,7 +125,7 @@ impl Diagnostic {
         buf.extend_from_slice(&self.pd_request_voltage_mv.to_le_bytes());
         buf.extend_from_slice(&self.pd_request_current_ma.to_le_bytes());
 
-        // Temperature data
+        // 温度数据
         buf.extend_from_slice(&self.temp_servo_power.to_le_bytes());
         buf.extend_from_slice(&self.temp_5v_power.to_le_bytes());
         buf.extend_from_slice(&self.temp_mcu.to_le_bytes());

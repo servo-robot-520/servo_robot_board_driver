@@ -75,27 +75,27 @@ impl BatteryTechnology {
 /// 电池状态
 #[derive(Debug, Clone, Default)]
 pub struct BatteryState {
-    // Overall battery voltage (mV)
+    // 电池总电压 (mV)
     pub voltage_mv: u16,
-    // Battery current: + indicates charging, - indicates discharge (mA)
+    // 电池电流: + 充电, - 放电 (mA)
     pub current_ma: i16,
-    // Battery capacity when fully charged (mAh)
+    // 满充容量 (mAh)
     pub capacity_mah: u16,
-    // Battery design capacity (mAh)
+    // 设计容量 (mAh)
     pub design_capacity_mah: u16,
-    // Relative state of charge (SOC, range 1~100)
+    // 荷电状态 (SOC, 1~100)
     pub percentage: u8,
-    // overall temperature，integer. reality is transmitted / 10
+    // 温度，整数，实际值 = 原始值 / 10
     pub temperature: i16,
     pub charge_status: BatteryChargeStatus,
     pub health: BatteryHealth,
     pub technology: BatteryTechnology,
-    // Whether the battery is in place
+    // 电池是否在位
     pub present: bool,
     pub serial_number: u16,
-    // Voltage of each cell (mV)
+    // 各电芯电压 (mV)
     pub cell_voltages_mv: Vec<u16>,
-    // Temperature of each cell, uint16. reality is transmitted / 10
+    // 各电芯温度，实际值 = 原始值 / 10
     pub cell_temperatures: Vec<i16>,
 }
 
@@ -205,8 +205,8 @@ impl FromPayload for BatteryState {
 
 impl core::fmt::Display for BatteryState {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // Convert integer types to f32 for display
-        // percentage: u8 1~100, voltage: u16 mV, current: i16 mA, temperature: i16 *10
+        // 整数转 f32 用于显示
+        // 百分比: u8 1~100, 电压: u16 mV, 电流: i16 mA, 温度: i16 ×10
         write!(
             f,
             "{:.1}% {:.1}V {:.1}A {:.1}°C {}",
