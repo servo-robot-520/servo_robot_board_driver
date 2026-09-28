@@ -4,7 +4,7 @@
 
 **ServoRobotBoard 的 Rust 上位机通信驱动（Workspace）**
 
-通过串口实现上位机与 ServoRobotBoard 之间的双向通信。本仓库是一个 Cargo workspace，包含协议层与驱动层两个 crate，可与 ROS2 Node / TUI / 测试等多种上位机场景集成。
+通过串口实现上位机与 ServoRobotBoard 之间的双向通信。本仓库是一个 Cargo workspace，包含协议层、驱动层与命令行工具三个 crate，可与 ROS2 Node / TUI / 测试等多种上位机场景集成。
 
 ## 工作区结构
 
@@ -12,6 +12,7 @@
 |-------|------|------|
 | [servo-robot-protocol](crates/servo-robot-protocol/README.md) | 协议层：帧格式、数据类型（IMU / Power / Battery / Diagnostic / DeviceInfo / Event / Log / Config / Servo 等）、CRC 校验。`no_std` + `alloc` 兼容，同时支持 PC 与嵌入式平台 | [中文](crates/servo-robot-protocol/README.md) · [English](crates/servo-robot-protocol/README_en.md) |
 | [servo-robot-driver](crates/servo-robot-driver/README.md) | 驱动层：串口通信、`DriverCallback` 回调、线程安全的状态快照、自动重连、模拟传输层、同步/异步双驱动（`Driver` / `AsyncDriver`） | [中文](crates/servo-robot-driver/README.md) · [English](crates/servo-robot-driver/README_en.md) |
+| [servo-robot-cli](crates/servo-robot-cli/README.md) | 命令行工具：板级配置读写（`config list/get/set/types`）、获取与流式输出 STM32 上报数据（`get` / `watch`）、`--json` 输出、`--mock` 无硬件运行 | [中文](crates/servo-robot-cli/README.md) · [English](crates/servo-robot-cli/README_en.md) |
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -154,6 +155,7 @@ driver.start().await?;
 
 - [servo-robot-protocol 协议层文档](crates/servo-robot-protocol/README.md) — 数据类型字段、位标志、CRC、编解码示例
 - [servo-robot-driver 驱动层文档](crates/servo-robot-driver/README.md) — 架构设计、数据流、线程模型、重连机制、回调 API、日志系统
+- [servo-robot-cli 命令行工具文档](crates/servo-robot-cli/README.md) — 命令参考、输出与退出码约定、单位换算、测试计划
 
 ## 许可证
 

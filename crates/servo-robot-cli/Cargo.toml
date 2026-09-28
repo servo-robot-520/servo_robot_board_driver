@@ -1,0 +1,16 @@
+[package]
+name = "servo-robot-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "ServoRobotBoard command-line tool: configuration and STM32 telemetry"
+
+[[bin]]
+name = "servo-robot-cli"
+path = "src/main.rs"
+
+[dependencies]
+servo-robot-driver = { path = "../servo-robot-driver", features = ["mock"] }
+servo-robot-protocol = { path = "../servo-robot-protocol" }
+clap = { workspace = true }
+serde_json = { workspace = true }

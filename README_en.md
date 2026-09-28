@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 **Rust host-side communication driver for ServoRobotBoard (Workspace)**
 
-Bidirectional serial communication between host PC and ServoRobotBoard. This repository is a Cargo workspace containing a protocol crate and a driver crate, integrable with ROS2 nodes, TUIs, tests, and other host-side scenarios.
+Bidirectional serial communication between host PC and ServoRobotBoard. This repository is a Cargo workspace containing the protocol crate, the driver crate, and a command-line tool, integrable with ROS2 nodes, TUIs, tests, and other host-side scenarios.
 
 ## Workspace Structure
 
@@ -12,6 +12,7 @@ Bidirectional serial communication between host PC and ServoRobotBoard. This rep
 |-------|-------------|------|
 | [servo-robot-protocol](crates/servo-robot-protocol/README_en.md) | Protocol layer: frame format, data types (IMU / Power / Battery / Diagnostic / DeviceInfo / Event / Log / Config / Servo), CRC. `no_std` + `alloc` compatible for both PC and embedded platforms | [中文](crates/servo-robot-protocol/README.md) · [English](crates/servo-robot-protocol/README_en.md) |
 | [servo-robot-driver](crates/servo-robot-driver/README_en.md) | Driver layer: serial transport, `DriverCallback` callbacks, thread-safe state snapshots, auto-reconnect, mock transport, sync/async dual drivers (`Driver` / `AsyncDriver`) | [中文](crates/servo-robot-driver/README.md) · [English](crates/servo-robot-driver/README_en.md) |
+| [servo-robot-cli](crates/servo-robot-cli/README_en.md) | Command-line tool: board configuration read/write (`config list/get/set/types`), one-shot and streaming STM32 telemetry (`get` / `watch`), `--json` output, hardware-free `--mock` mode | [中文](crates/servo-robot-cli/README.md) · [English](crates/servo-robot-cli/README_en.md) |
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -154,6 +155,7 @@ driver.start().await?;
 
 - [servo-robot-protocol docs](crates/servo-robot-protocol/README_en.md) — data type fields, bitflags, CRC, codec examples
 - [servo-robot-driver docs](crates/servo-robot-driver/README_en.md) — architecture, data flow, threading model, reconnect, callback API, logging
+- [servo-robot-cli docs](crates/servo-robot-cli/README_en.md) — command reference, output and exit-code conventions, unit conversion, test plan
 
 ## License
 
