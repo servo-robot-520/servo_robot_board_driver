@@ -334,7 +334,7 @@ impl Config {
 /// 获取配置值
 pub fn get_config_value(c: &BoardConfigSnapshot, ct: ConfigType) -> Config {
     match ct {
-        ConfigType::EnableBatOut1 => Config::EnableBatOut1(c.enable_bat_ou1),
+        ConfigType::EnableBatOut1 => Config::EnableBatOut1(c.enable_bat_out1),
         ConfigType::EnablePwrBatOut2 => Config::EnableBatOut2(c.enable_bat_out2),
         ConfigType::EnablePwr5V => Config::EnablePwr5V(c.enable_pwr_5v),
         ConfigType::EnableCharge => Config::EnableCharge(c.enable_charge),
@@ -385,14 +385,14 @@ impl FromPayload for Config {
 /// Snapshot of board-level configuration
 ///
 /// Field order matches ConfigType enum values:
-/// - Switches (0x10~0x13): enable_bat_ou1, enable_bat_out2, enable_pwr_5v, enable_charge
+/// - Switches (0x10~0x13): enable_bat_out1, enable_bat_out2, enable_pwr_5v, enable_charge
 /// - Current limits (0x20~0x25): bat_out1/2, 5v, servo current limits, charge min/max current
 /// - Temp limits (0x30~0x33): servo/5v temp limits, charge temp derating/limit
 /// - Misc (0x40~0x45): baud rate, charge stop soc/voltage, tx log level, BMS/IMU IC
 #[derive(Debug, Clone)]
 pub struct BoardConfigSnapshot {
     // === Switches (0x10~0x13) ===
-    pub enable_bat_ou1: bool,
+    pub enable_bat_out1: bool,
     pub enable_bat_out2: bool,
     pub enable_pwr_5v: bool,
     pub enable_charge: bool,
@@ -438,7 +438,7 @@ impl Default for BoardConfigSnapshot {
     fn default() -> Self {
         BoardConfigSnapshot {
             // 开关
-            enable_bat_ou1: true,
+            enable_bat_out1: true,
             enable_bat_out2: true,
             enable_pwr_5v: true,
             enable_charge: true,
@@ -480,7 +480,7 @@ impl BoardConfigSnapshot {
         let mut o = 0;
 
         // === Switches (0x10~0x13) — 4 bytes ===
-        let enable_bat_ou1 = data[o] != 0;
+        let enable_bat_out1 = data[o] != 0;
         o += 1;
         let enable_bat_out2 = data[o] != 0;
         o += 1;
@@ -530,7 +530,7 @@ impl BoardConfigSnapshot {
         let _ = o; // suppress unused warning
 
         Ok(BoardConfigSnapshot {
-            enable_bat_ou1,
+            enable_bat_out1,
             enable_bat_out2,
             enable_pwr_5v,
             enable_charge,
@@ -558,7 +558,7 @@ impl BoardConfigSnapshot {
         let mut buf = Vec::with_capacity(Self::PAYLOAD_SIZE);
 
         // === Switches (0x10~0x13) ===
-        buf.push(self.enable_bat_ou1 as u8);
+        buf.push(self.enable_bat_out1 as u8);
         buf.push(self.enable_bat_out2 as u8);
         buf.push(self.enable_pwr_5v as u8);
         buf.push(self.enable_charge as u8);
@@ -610,7 +610,7 @@ impl core::fmt::Display for BoardConfigSnapshot {
              temp=[{:.1},{:.1},{:.1},{:.1}]°C \
              lvl={} bms={} imu={} \
              chg={:.1}mV/{}% baud={}",
-            if self.enable_bat_ou1 { "O1" } else { "-" },
+            if self.enable_bat_out1 { "O1" } else { "-" },
             if self.enable_bat_out2 { "O2" } else { "-" },
             if self.enable_pwr_5v { "5V" } else { "-" },
             if self.enable_charge { "CG" } else { "-" },
@@ -697,7 +697,7 @@ mod tests {
 
         let decoded = BoardConfigSnapshot::from_bytes(&bytes).unwrap();
         // 开关
-        assert_eq!(config.enable_bat_ou1, decoded.enable_bat_ou1);
+        assert_eq!(config.enable_bat_out1, decoded.enable_bat_out1);
         assert_eq!(config.enable_bat_out2, decoded.enable_bat_out2);
         assert_eq!(config.enable_pwr_5v, decoded.enable_pwr_5v);
         assert_eq!(config.enable_charge, decoded.enable_charge);
@@ -742,7 +742,7 @@ mod tests {
     #[test]
     fn test_board_config_snapshot_custom_values() {
         let config = BoardConfigSnapshot {
-            enable_bat_ou1: true,
+            enable_bat_out1: true,
             enable_bat_out2: false,
             enable_pwr_5v: false,
             enable_charge: true,
@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(bytes.len(), BoardConfigSnapshot::PAYLOAD_SIZE);
         let decoded = BoardConfigSnapshot::from_bytes(&bytes).unwrap();
 
-        assert_eq!(decoded.enable_bat_ou1, true);
+        assert_eq!(decoded.enable_bat_out1, true);
         assert_eq!(decoded.enable_bat_out2, false);
         assert_eq!(decoded.enable_pwr_5v, false);
         assert_eq!(decoded.enable_charge, true);
